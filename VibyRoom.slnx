@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Api/">
+    <Project Path="src/Api/VibyRoom.Api/VibyRoom.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Application/">
+    <Project Path="src/Application/VibyRoom.Application.Abstractions/VibyRoom.Application.Abstractions.csproj" />
+    <Project Path="src/Application/VibyRoom.Application.Contracts/VibyRoom.Application.Contracts.csproj" />
+    <Project Path="src/Application/VibyRoom.Application/VibyRoom.Application.csproj" />
+  </Folder>
+  <Folder Name="/src/Domain/">
+    <Project Path="src/Domain/VibyRoom.Domain.Core/VibyRoom.Domain.Core.csproj" />
+  </Folder>
+  <Folder Name="/src/Infrastructure/">
+    <Project Path="src/Infrastructure/VibyRoom.Infrastructure.Persistence/VibyRoom.Infrastructure.Persistence.csproj" />
+    <Project Path="src/Infrastructure/VibyRoom.Infrastructure/VibyRoom.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+</Solution>
