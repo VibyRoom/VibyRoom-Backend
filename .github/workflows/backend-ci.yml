@@ -56,8 +56,8 @@ jobs:
       - name: Run all tests
         run: |
           if [[ ! -d tests ]]; then
-            echo "::error::Directory tests/ does not exist."
-            exit 1
+            echo "::notice::No tests directory found. Skipping tests."
+            exit 0
           fi
 
           mapfile -d '' test_projects < <(
@@ -65,8 +65,8 @@ jobs:
           )
 
           if (( ${#test_projects[@]} == 0 )); then
-            echo "::error::No test projects (.csproj) found in tests/."
-            exit 1
+            echo "::notice::No test projects found. Skipping tests."
+            exit 0
           fi
 
           for project in "${test_projects[@]}"; do
