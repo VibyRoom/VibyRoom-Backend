@@ -6,4 +6,9 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\..\Application\VibyRoom.Application.Abstractions\VibyRoom.Application.Abstractions.csproj" />
+      <ProjectReference Include="..\..\Domain\VibyRoom.Domain.Core\VibyRoom.Domain.Core.csproj" />
+    </ItemGroup>
+
 </Project>

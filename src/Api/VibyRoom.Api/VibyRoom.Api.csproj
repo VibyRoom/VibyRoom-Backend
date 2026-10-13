@@ -10,4 +10,10 @@
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5"/>
     </ItemGroup>
 
+    <ItemGroup>
+      <ProjectReference Include="..\..\Application\VibyRoom.Application\VibyRoom.Application.csproj" />
+      <ProjectReference Include="..\..\Infrastructure\VibyRoom.Infrastructure.Persistence\VibyRoom.Infrastructure.Persistence.csproj" />
+      <ProjectReference Include="..\..\Infrastructure\VibyRoom.Infrastructure\VibyRoom.Infrastructure.csproj" />
+    </ItemGroup>
+
 </Project>
