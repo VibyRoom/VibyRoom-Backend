@@ -1,0 +1,76 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Find Backend solution
+        id: solution
+        run: |
+          mapfile -d '' solutions < <(
+            find . -type f \( -name '*.sln' -o -name '*.slnx' \) \
+              -not -path './tests/*' -print0
+          )
+
+          if (( ${#solutions[@]} != 1 )); then
+            echo "::error::Expected exactly one Backend Solution, found ${#solutions[@]}."
+            exit 1
+          fi
+
+          echo "path=${solutions[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Backend dependencies
+        env:
+          SOLUTION_PATH: ${{ steps.solution.outputs.path }}
+        run: dotnet restore "$SOLUTION_PATH"
+
+      - name: Build Backend
+        env:
+          SOLUTION_PATH: ${{ steps.solution.outputs.path }}
+        run: dotnet build "$SOLUTION_PATH" --configuration Release --no-restore
+
+      - name: Run all tests
+        run: |
+          if [[ ! -d tests ]]; then
+            echo "::error::Directory tests/ does not exist."
+            exit 1
+          fi
+
+          mapfile -d '' test_projects < <(
+            find tests -type f -name '*.csproj' -print0 | sort -z
+          )
+
+          if (( ${#test_projects[@]} == 0 )); then
+            echo "::error::No test projects (.csproj) found in tests/."
+            exit 1
+          fi
+
+          for project in "${test_projects[@]}"; do
+            echo "::group::dotnet test $project"
+            dotnet test "$project" --configuration Release
+            echo "::endgroup::"
+          done
