@@ -16,4 +16,8 @@
     <Project Path="src/Infrastructure/VibyRoom.Infrastructure/VibyRoom.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/" />
+  <Folder Name="/common/">
+    <File Path="DockerCompose.yaml"/>
+    <File Path="env.txt"/>
+  </Folder>
 </Solution>
