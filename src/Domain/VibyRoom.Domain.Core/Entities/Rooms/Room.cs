@@ -6,6 +6,7 @@ namespace VibyRoom.Domain.Core.Entities.Rooms;
 public sealed class Room
 {
     private const int MaxNameLength = 100;
+    private const int InviteCodeLength = 22;
 
     private readonly List<RoomMember> _members = [];
     private readonly IReadOnlyCollection<RoomMember> _membersView;
@@ -15,15 +16,70 @@ public sealed class Room
         string inviteCode,
         int capacity,
         RoomMember owner)
+        : this(
+            Guid.NewGuid(),
+            name,
+            inviteCode,
+            RoomStatus.Active,
+            owner.GuestId,
+            capacity)
     {
-        Id = Guid.NewGuid();
-        Name = name;
-        InviteCode = inviteCode;
-        Capacity = capacity;
-        Status = RoomStatus.Active;
-        OwnerGuestId = owner.GuestId;
-
         _members.Add(owner);
+    }
+
+    private Room(
+        Guid id,
+        string name,
+        string inviteCode,
+        RoomStatus status,
+        Guid? ownerGuestId,
+        int capacity)
+    {
+        if (id == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "Room ID cannot be empty.",
+                nameof(id));
+        }
+
+        if (capacity < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(capacity),
+                "Room capacity must be greater than zero.");
+        }
+
+        if (!Enum.IsDefined(status))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(status),
+                "Unknown room status.");
+        }
+
+        if (status == RoomStatus.Active &&
+            (!ownerGuestId.HasValue ||
+             ownerGuestId.Value == Guid.Empty))
+        {
+            throw new ArgumentException(
+                "Active room must have a valid owner.",
+                nameof(ownerGuestId));
+        }
+
+        if (status == RoomStatus.Closed &&
+            ownerGuestId.HasValue)
+        {
+            throw new ArgumentException(
+                "Closed room cannot have an owner.",
+                nameof(ownerGuestId));
+        }
+
+        Id = id;
+        Name = ValidateName(name);
+        InviteCode = ValidateInviteCode(inviteCode);
+        Status = status;
+        OwnerGuestId = ownerGuestId;
+        Capacity = capacity;
+
         _membersView = _members.AsReadOnly();
     }
 
@@ -50,8 +106,7 @@ public sealed class Room
         DateTimeOffset joinedAtUtc)
     {
         var normalizedName = ValidateName(name);
-
-        ArgumentException.ThrowIfNullOrWhiteSpace(inviteCode);
+        var validatedInviteCode = ValidateInviteCode(inviteCode);
 
         ValidateGuestId(ownerGuestId, nameof(ownerGuestId));
 
@@ -69,7 +124,7 @@ public sealed class Room
 
         return new Room(
             normalizedName,
-            inviteCode,
+            validatedInviteCode,
             capacity,
             owner);
     }
@@ -188,7 +243,8 @@ public sealed class Room
             newOwnerGuestId,
             nameof(newOwnerGuestId));
 
-        if (_members.All(member => member.GuestId != newOwnerGuestId))
+        if (_members.All(
+                member => member.GuestId != newOwnerGuestId))
         {
             throw new RoomDomainException(
                 RoomDomainErrorCode.MemberNotFound,
@@ -221,7 +277,8 @@ public sealed class Room
             return null;
         }
 
-        if (_members.All(member => member.GuestId != guestId))
+        if (_members.All(
+                member => member.GuestId != guestId))
         {
             return null;
         }
@@ -231,13 +288,13 @@ public sealed class Room
             : RoomRole.Member;
     }
 
-    public void Rename(Guid requestedBy, string newName)
+    public void Rename(
+        Guid requestedBy,
+        string newName)
     {
         EnsureOwner(requestedBy);
 
-        var normalizedName = ValidateName(newName);
-
-        Name = normalizedName;
+        Name = ValidateName(newName);
     }
 
     private void EnsureActive()
@@ -280,6 +337,31 @@ public sealed class Room
         }
 
         return normalizedName;
+    }
+
+    private static string ValidateInviteCode(string inviteCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(inviteCode);
+
+        if (inviteCode.Length != InviteCodeLength ||
+            inviteCode.Any(character =>
+                !IsBase64UrlCharacter(character)))
+        {
+            throw new ArgumentException(
+                $"Invite code must contain exactly {InviteCodeLength} base64url characters.",
+                nameof(inviteCode));
+        }
+
+        return inviteCode;
+    }
+
+    private static bool IsBase64UrlCharacter(char character)
+    {
+        return character is
+            >= 'A' and <= 'Z' or
+            >= 'a' and <= 'z' or
+            >= '0' and <= '9' or
+            '-' or '_';
     }
 
     private static void ValidateGuestId(
