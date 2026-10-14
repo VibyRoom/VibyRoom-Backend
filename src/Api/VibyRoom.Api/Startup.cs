@@ -2,8 +2,11 @@ using VibyRoom.Api.Authentication;
 using VibyRoom.Api.Errors;
 using VibyRoom.Api.OpenApi;
 using VibyRoom.Api.RateLimiting;
+using VibyRoom.Api.Realtime;
+using VibyRoom.Api.Realtime.Security;
 using VibyRoom.Application;
 using VibyRoom.Application.Abstractions.Authentication;
+using VibyRoom.Application.Abstractions.Realtime;
 using VibyRoom.Infrastructure;
 using VibyRoom.Infrastructure.Persistence;
 
@@ -70,6 +73,41 @@ public sealed class Startup
 
         services.AddInfrastructurePersistance(
             connectionString);
+
+        // Realtime infrastructure.
+        services.AddSignalR();
+
+        services.AddSingleton<RoomPresenceRegistry>();
+
+        services.AddSingleton<RoomPresenceCoordinator>();
+
+        services.AddSingleton<IRoomPresenceNotifier>(
+            serviceProvider => serviceProvider
+                .GetRequiredService<RoomPresenceCoordinator>());
+
+        // Explicitly configured allowed origins.
+        var originPolicy = new RoomHubOriginPolicy(
+            _configuration);
+
+        services.AddSingleton(originPolicy);
+
+        services.AddCors(options =>
+        {
+            options.AddPolicy(
+                RoomHubOriginPolicy.CorsPolicyName,
+                policy =>
+                {
+                    policy
+                        .WithOrigins(
+                            originPolicy.AllowedOrigins.ToArray())
+                        .WithMethods(
+                            "GET",
+                            "POST",
+                            "DELETE")
+                        .AllowAnyHeader()
+                        .AllowCredentials();
+                });
+        });
     }
 
     public void Configure(WebApplication app)
@@ -94,6 +132,23 @@ public sealed class Startup
 
         app.UseRouting();
 
+        // WebSocket Origin protection.
+        var originPolicy = app.Services
+            .GetRequiredService<RoomHubOriginPolicy>();
+
+        var webSocketOptions = new WebSocketOptions();
+
+        foreach (var origin in originPolicy.AllowedOrigins)
+        {
+            webSocketOptions.AllowedOrigins.Add(origin);
+        }
+
+        app.UseWebSockets(webSocketOptions);
+
+        app.UseMiddleware<RoomHubOriginMiddleware>();
+
+        app.UseCors();
+
         app.UseAuthentication();
 
         app.UseMiddleware<GuestAntiforgeryMiddleware>();
@@ -102,6 +157,12 @@ public sealed class Startup
 
         app.UseRateLimiter();
 
+        // REST: ControllerBase only.
         app.MapControllers();
+
+        // SignalR transport, not Minimal API.
+        app.MapHub<RoomHub>("/hubs/rooms")
+            .RequireCors(
+                RoomHubOriginPolicy.CorsPolicyName);
     }
 }
