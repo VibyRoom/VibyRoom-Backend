@@ -1,14 +1,18 @@
-
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Npgsql;
 using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Domain.Core.Entities.Rooms;
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
+
 namespace VibyRoom.Infrastructure.Persistence;
 
 public sealed class VibyRoomDbContext : DbContext
 {
     private const long InitialVersion = 1;
+
+    private const string InviteCodeUniqueIndexName =
+        "ux_rooms_invite_code";
 
     public VibyRoomDbContext(
         DbContextOptions<VibyRoomDbContext> options)
@@ -45,6 +49,13 @@ public sealed class VibyRoomDbContext : DbContext
                 "The room was modified by another operation. Reload the room and retry the operation.",
                 exception);
         }
+        catch (DbUpdateException exception)
+            when (IsInviteCodeUniqueViolation(exception))
+        {
+            throw new RoomInviteCodeConflictException(
+                "A room with the generated invitation code already exists.",
+                exception);
+        }
     }
 
     public override int SaveChanges(
@@ -52,6 +63,16 @@ public sealed class VibyRoomDbContext : DbContext
     {
         throw new NotSupportedException(
             "Synchronous saving is not supported. Use SaveChangesAsync.");
+    }
+
+    private static bool IsInviteCodeUniqueViolation(
+        DbUpdateException exception)
+    {
+        return exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: InviteCodeUniqueIndexName
+        };
     }
 
     private void PrepareAggregateChanges()

@@ -1,5 +1,7 @@
 using VibyRoom.Api.Authentication;
+using VibyRoom.Application;
 using VibyRoom.Application.Abstractions.Authentication;
+using VibyRoom.Infrastructure;
 using VibyRoom.Infrastructure.Persistence;
 
 namespace VibyRoom.Api;
@@ -39,6 +41,9 @@ public sealed class Startup
 
         services.AddGuestAuthentication();
         services.AddGuestAntiforgery();
+
+        services.AddApplication(_configuration);
+        services.AddInfrastructure();
 
         var connectionString = _configuration
             .GetConnectionString("DefaultConnection");
