@@ -21,5 +21,6 @@
   <Folder Name="/common/">
     <File Path="DockerCompose.yaml" />
     <File Path="env.txt" />
+    <File Path=".env"/>
   </Folder>
 </Solution>
