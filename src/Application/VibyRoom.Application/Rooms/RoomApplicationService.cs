@@ -1,7 +1,9 @@
+using Microsoft.Extensions.Logging;
 using VibyRoom.Application.Abstractions.Authentication;
 using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Application.Abstractions.Invitations;
 using VibyRoom.Application.Abstractions.Repositories;
+using VibyRoom.Application.Abstractions.Realtime;
 using VibyRoom.Application.Configuration;
 using VibyRoom.Application.Contracts.Rooms;
 using VibyRoom.Application.Errors;
@@ -22,13 +24,17 @@ public sealed class RoomApplicationService
     private readonly IInviteCodeGenerator _inviteCodeGenerator;
     private readonly TimeProvider _timeProvider;
     private readonly RoomSettings _roomSettings;
+    private readonly IRoomPresenceNotifier _roomPresenceNotifier;
+    private readonly ILogger<RoomApplicationService> _logger;
 
     public RoomApplicationService(
         IRoomRepository roomRepository,
         ICurrentGuest currentGuest,
         IInviteCodeGenerator inviteCodeGenerator,
         TimeProvider timeProvider,
-        RoomSettings roomSettings)
+        RoomSettings roomSettings,
+        IRoomPresenceNotifier roomPresenceNotifier,
+        ILogger<RoomApplicationService> logger)
     {
         _roomRepository = roomRepository
             ?? throw new ArgumentNullException(nameof(roomRepository));
@@ -44,6 +50,12 @@ public sealed class RoomApplicationService
 
         _roomSettings = roomSettings
             ?? throw new ArgumentNullException(nameof(roomSettings));
+
+        _roomPresenceNotifier = roomPresenceNotifier
+            ?? throw new ArgumentNullException(nameof(roomPresenceNotifier));
+
+        _logger = logger
+            ?? throw new ArgumentNullException(nameof(logger));
 
         if (_roomSettings.Capacity <= 0)
         {
@@ -208,6 +220,17 @@ public sealed class RoomApplicationService
         }
 
         await SaveChangesAsync(cancellationToken);
+
+        if (room.Status == RoomStatus.Closed)
+        {
+            await TryRevokeRoomPresenceAsync(roomId);
+        }
+        else
+        {
+            await TryRevokeMemberPresenceAsync(
+                roomId,
+                guestId);
+        }
     }
 
     public async Task RemoveMemberAsync(
@@ -223,7 +246,10 @@ public sealed class RoomApplicationService
             cancellationToken);
 
         EnsureOwner(room, guestId);
-        ValidateGuestId(targetGuestId, nameof(targetGuestId));
+
+        ValidateGuestId(
+            targetGuestId,
+            nameof(targetGuestId));
 
         try
         {
@@ -239,6 +265,10 @@ public sealed class RoomApplicationService
         }
 
         await SaveChangesAsync(cancellationToken);
+
+        await TryRevokeMemberPresenceAsync(
+            roomId,
+            targetGuestId);
     }
 
     public async Task TransferOwnershipAsync(
@@ -301,6 +331,50 @@ public sealed class RoomApplicationService
         }
 
         await SaveChangesAsync(cancellationToken);
+
+        await TryRevokeRoomPresenceAsync(roomId);
+    }
+
+    private async Task TryRevokeMemberPresenceAsync(
+        Guid roomId,
+        Guid guestId)
+    {
+        try
+        {
+            // Persistence has already been committed.
+            // Request cancellation must not prevent cleanup.
+            await _roomPresenceNotifier.RevokeMemberAsync(
+                roomId,
+                guestId,
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Room membership was saved, but Realtime " +
+                "revocation failed for room {RoomId}.",
+                roomId);
+        }
+    }
+
+    private async Task TryRevokeRoomPresenceAsync(
+        Guid roomId)
+    {
+        try
+        {
+            await _roomPresenceNotifier.RevokeRoomAsync(
+                roomId,
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Room closure was saved, but Realtime " +
+                "revocation failed for room {RoomId}.",
+                roomId);
+        }
     }
 
     private Guid RequireCurrentGuest()
@@ -352,11 +426,13 @@ public sealed class RoomApplicationService
         }
     }
 
-    private static void ValidateRoomId(Guid roomId)
+    private static void ValidateRoomId(
+        Guid roomId)
     {
         if (roomId == Guid.Empty)
         {
-            throw ValidationError("Room ID cannot be empty.");
+            throw ValidationError(
+                "Room ID cannot be empty.");
         }
     }
 
@@ -393,11 +469,13 @@ public sealed class RoomApplicationService
         return normalized;
     }
 
-    private static void ValidateInviteCode(string? inviteCode)
+    private static void ValidateInviteCode(
+        string? inviteCode)
     {
         if (inviteCode is null ||
             inviteCode.Length != InviteCodeLength ||
-            inviteCode.Any(character => !IsBase64UrlCharacter(character)))
+            inviteCode.Any(
+                character => !IsBase64UrlCharacter(character)))
         {
             throw new RoomApplicationException(
                 ApplicationErrorCode.InvalidInvitation,
@@ -405,7 +483,8 @@ public sealed class RoomApplicationService
         }
     }
 
-    private static bool IsBase64UrlCharacter(char character)
+    private static bool IsBase64UrlCharacter(
+        char character)
     {
         return character is
             >= 'A' and <= 'Z' or
@@ -414,7 +493,8 @@ public sealed class RoomApplicationService
             '-' or '_';
     }
 
-    private static RoomDetails MapRoomDetails(Room room)
+    private static RoomDetails MapRoomDetails(
+        Room room)
     {
         var members = room.Members
             .Select(member =>
@@ -459,7 +539,8 @@ public sealed class RoomApplicationService
         {
             throw new RoomApplicationException(
                 ApplicationErrorCode.InviteCodeConflict,
-                "Failed to create room because the invitation code already exists.",
+                "Failed to create room because the invitation " +
+                "code already exists.",
                 exception);
         }
     }

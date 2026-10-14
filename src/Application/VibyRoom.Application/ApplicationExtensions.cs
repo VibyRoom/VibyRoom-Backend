@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using VibyRoom.Application.Abstractions.Rooms;
 using VibyRoom.Application.Configuration;
 using VibyRoom.Application.Rooms;
 
@@ -32,6 +33,10 @@ public static class ApplicationExtensions
             TimeProvider.System);
 
         services.AddScoped<RoomApplicationService>();
+
+        services.AddScoped<
+            IRoomMembershipQuery,
+            RoomMembershipQuery>();
 
         return services;
     }
