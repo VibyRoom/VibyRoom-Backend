@@ -1,3 +1,5 @@
+using VibyRoom.Api.Authentication;
+using VibyRoom.Application.Abstractions.Authentication;
 using VibyRoom.Infrastructure.Persistence;
 
 namespace VibyRoom.Api;
@@ -5,18 +7,38 @@ namespace VibyRoom.Api;
 public sealed class Startup
 {
     private readonly IConfiguration _configuration;
+    private readonly IHostEnvironment _environment;
 
-    public Startup(IConfiguration configuration)
+    public Startup(
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
         _configuration = configuration
                          ?? throw new ArgumentNullException(nameof(configuration));
+
+        _environment = environment
+                       ?? throw new ArgumentNullException(nameof(environment));
     }
 
     public void ConfigureServices(IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddControllers();
         services.AddOpenApi();
+
+        services.AddHttpContextAccessor();
+
+        services.AddScoped<
+            ICurrentGuest,
+            HttpContextCurrentGuest>();
+
+        services.AddGuestDataProtection(
+            _configuration,
+            _environment);
+
+        services.AddGuestAuthentication();
+        services.AddGuestAntiforgery();
 
         var connectionString = _configuration
             .GetConnectionString("DefaultConnection");
@@ -40,5 +62,15 @@ public sealed class Startup
         }
 
         app.UseHttpsRedirection();
+
+        app.UseRouting();
+
+        app.UseAuthentication();
+
+        app.UseMiddleware<GuestAntiforgeryMiddleware>();
+
+        app.UseAuthorization();
+
+        app.MapControllers();
     }
 }

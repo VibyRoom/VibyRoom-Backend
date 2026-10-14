@@ -15,9 +15,11 @@
     <Project Path="src/Infrastructure/VibyRoom.Infrastructure.Persistence/VibyRoom.Infrastructure.Persistence.csproj" />
     <Project Path="src/Infrastructure/VibyRoom.Infrastructure/VibyRoom.Infrastructure.csproj" />
   </Folder>
-  <Folder Name="/tests/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/VibyRoom.Api.IntegrationTests/VibyRoom.Api.IntegrationTests.csproj" />
+  </Folder>
   <Folder Name="/common/">
-    <File Path="DockerCompose.yaml"/>
-    <File Path="env.txt"/>
+    <File Path="DockerCompose.yaml" />
+    <File Path="env.txt" />
   </Folder>
 </Solution>
