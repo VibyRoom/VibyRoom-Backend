@@ -85,6 +85,10 @@ public sealed class Startup
             serviceProvider => serviceProvider
                 .GetRequiredService<RoomPresenceCoordinator>());
 
+        services.AddSingleton<
+            IRoomRealtimePublisher,
+            SignalRRoomRealtimePublisher>();
+
         // Explicitly configured allowed origins.
         var originPolicy = new RoomHubOriginPolicy(
             _configuration);

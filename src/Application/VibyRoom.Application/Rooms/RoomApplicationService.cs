@@ -24,7 +24,7 @@ public sealed class RoomApplicationService
     private readonly IInviteCodeGenerator _inviteCodeGenerator;
     private readonly TimeProvider _timeProvider;
     private readonly RoomSettings _roomSettings;
-    private readonly IRoomPresenceNotifier _roomPresenceNotifier;
+    private readonly IRoomRealtimePublisher _roomRealtimePublisher;
     private readonly ILogger<RoomApplicationService> _logger;
 
     public RoomApplicationService(
@@ -33,7 +33,7 @@ public sealed class RoomApplicationService
         IInviteCodeGenerator inviteCodeGenerator,
         TimeProvider timeProvider,
         RoomSettings roomSettings,
-        IRoomPresenceNotifier roomPresenceNotifier,
+        IRoomRealtimePublisher roomRealtimePublisher,
         ILogger<RoomApplicationService> logger)
     {
         _roomRepository = roomRepository
@@ -51,8 +51,8 @@ public sealed class RoomApplicationService
         _roomSettings = roomSettings
             ?? throw new ArgumentNullException(nameof(roomSettings));
 
-        _roomPresenceNotifier = roomPresenceNotifier
-            ?? throw new ArgumentNullException(nameof(roomPresenceNotifier));
+        _roomRealtimePublisher = roomRealtimePublisher
+            ?? throw new ArgumentNullException(nameof(roomRealtimePublisher));
 
         _logger = logger
             ?? throw new ArgumentNullException(nameof(logger));
@@ -189,7 +189,23 @@ public sealed class RoomApplicationService
 
         if (joined)
         {
+            var member = room.Members.Single(
+                item => item.GuestId == guestId);
+
+            var memberData = new RoomMemberRealtimeData(
+                member.GuestId,
+                member.DisplayName,
+                member.JoinedAtUtc);
+
             await SaveChangesAsync(cancellationToken);
+
+            await TryPublishEventAsync(
+                room.Id,
+                "RoomMemberJoined",
+                () => _roomRealtimePublisher.MemberJoinedAsync(
+                    room.Id,
+                    memberData,
+                    CancellationToken.None));
         }
 
         return new JoinRoomResult(
@@ -223,13 +239,22 @@ public sealed class RoomApplicationService
 
         if (room.Status == RoomStatus.Closed)
         {
-            await TryRevokeRoomPresenceAsync(roomId);
+            await TryPublishEventAsync(
+                roomId,
+                "RoomClosed",
+                () => _roomRealtimePublisher.RoomClosedAsync(
+                    roomId,
+                    CancellationToken.None));
         }
         else
         {
-            await TryRevokeMemberPresenceAsync(
+            await TryPublishEventAsync(
                 roomId,
-                guestId);
+                "RoomMemberLeft",
+                () => _roomRealtimePublisher.MemberLeftAsync(
+                    roomId,
+                    guestId,
+                    CancellationToken.None));
         }
     }
 
@@ -266,9 +291,13 @@ public sealed class RoomApplicationService
 
         await SaveChangesAsync(cancellationToken);
 
-        await TryRevokeMemberPresenceAsync(
+        await TryPublishEventAsync(
             roomId,
-            targetGuestId);
+            "RoomMemberRemoved",
+            () => _roomRealtimePublisher.MemberRemovedAsync(
+                roomId,
+                targetGuestId,
+                CancellationToken.None));
     }
 
     public async Task TransferOwnershipAsync(
@@ -289,7 +318,9 @@ public sealed class RoomApplicationService
             newOwnerGuestId,
             nameof(newOwnerGuestId));
 
-        var previousOwnerGuestId = room.OwnerGuestId;
+        var previousOwnerGuestId = room.OwnerGuestId
+            ?? throw new InvalidOperationException(
+                "An active room must have an owner.");
 
         try
         {
@@ -304,7 +335,20 @@ public sealed class RoomApplicationService
 
         if (room.OwnerGuestId != previousOwnerGuestId)
         {
+            var committedNewOwnerGuestId = room.OwnerGuestId
+                ?? throw new InvalidOperationException(
+                    "An active room must have an owner.");
+
             await SaveChangesAsync(cancellationToken);
+
+            await TryPublishEventAsync(
+                roomId,
+                "RoomOwnerChanged",
+                () => _roomRealtimePublisher.OwnerChangedAsync(
+                    roomId,
+                    previousOwnerGuestId,
+                    committedNewOwnerGuestId,
+                    CancellationToken.None));
         }
     }
 
@@ -332,47 +376,32 @@ public sealed class RoomApplicationService
 
         await SaveChangesAsync(cancellationToken);
 
-        await TryRevokeRoomPresenceAsync(roomId);
+        await TryPublishEventAsync(
+            roomId,
+            "RoomClosed",
+            () => _roomRealtimePublisher.RoomClosedAsync(
+                roomId,
+                CancellationToken.None));
     }
 
-    private async Task TryRevokeMemberPresenceAsync(
+    private async Task TryPublishEventAsync(
         Guid roomId,
-        Guid guestId)
+        string eventName,
+        Func<Task> publish)
     {
         try
         {
-            // Persistence has already been committed.
-            // Request cancellation must not prevent cleanup.
-            await _roomPresenceNotifier.RevokeMemberAsync(
-                roomId,
-                guestId,
-                CancellationToken.None);
+            // Persistence has already been committed. The realtime
+            // operation must not use an aborted HTTP request token.
+            await publish();
         }
         catch (Exception exception)
         {
             _logger.LogError(
                 exception,
-                "Room membership was saved, but Realtime " +
-                "revocation failed for room {RoomId}.",
-                roomId);
-        }
-    }
-
-    private async Task TryRevokeRoomPresenceAsync(
-        Guid roomId)
-    {
-        try
-        {
-            await _roomPresenceNotifier.RevokeRoomAsync(
-                roomId,
-                CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                exception,
-                "Room closure was saved, but Realtime " +
-                "revocation failed for room {RoomId}.",
+                "Room state change was committed, but Realtime " +
+                "operation {EventName} failed for room {RoomId}.",
+                eventName,
                 roomId);
         }
     }

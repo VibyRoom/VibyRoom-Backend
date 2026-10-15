@@ -7,4 +7,19 @@ public interface IRoomHubClient
 
     Task RoomSubscriptionRevoked(
         RoomSubscriptionRevoked payload);
+
+    Task RoomMemberJoined(
+        RoomMemberJoined payload);
+
+    Task RoomMemberLeft(
+        RoomMemberLeft payload);
+
+    Task RoomMemberRemoved(
+        RoomMemberRemoved payload);
+
+    Task RoomOwnerChanged(
+        RoomOwnerChanged payload);
+
+    Task RoomClosed(
+        RoomClosed payload);
 }

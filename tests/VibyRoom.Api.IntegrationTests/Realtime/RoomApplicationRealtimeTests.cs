@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using VibyRoom.Application.Abstractions.Authentication;
+using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Application.Abstractions.Invitations;
 using VibyRoom.Application.Abstractions.Repositories;
 using VibyRoom.Application.Abstractions.Realtime;
 using VibyRoom.Application.Configuration;
 using VibyRoom.Application.Contracts.Rooms;
+using VibyRoom.Application.Errors;
 using VibyRoom.Application.Rooms;
 using VibyRoom.Domain.Core.Entities.Rooms;
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
@@ -15,76 +17,148 @@ namespace VibyRoom.Api.IntegrationTests.Realtime;
 public sealed class RoomApplicationRealtimeTests
 {
     [Fact]
-    public async Task LeaveMember_SavesBeforeRevocation()
+    public async Task JoinMember_SavesBeforePublishing()
+    {
+        var fixture = new Fixture(joinMember: false);
+        fixture.Guest.GuestId = fixture.MemberId;
+
+        var result = await fixture.Service.JoinRoomAsync(
+            new JoinRoomCommand(
+                fixture.Room.InviteCode,
+                "New member"),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Joined);
+
+        Assert.Equal(
+            new[] { "save", "member-joined" },
+            fixture.Events);
+
+        Assert.Equal(
+            fixture.Room.Id,
+            fixture.Publisher.LastRoomId);
+
+        var member = Assert.Single(
+            fixture.Room.Members,
+            x => x.GuestId == fixture.MemberId);
+
+        Assert.Equal(
+            new RoomMemberRealtimeData(
+                member.GuestId,
+                member.DisplayName,
+                member.JoinedAtUtc),
+            fixture.Publisher.LastJoinedMember);
+
+        Assert.Equal("New member", member.DisplayName);
+    }
+
+    [Fact]
+    public async Task RepeatedJoin_DoesNotSaveOrPublish()
     {
         var fixture = new Fixture();
         fixture.Guest.GuestId = fixture.MemberId;
 
-        await fixture.Service.LeaveRoomAsync(fixture.Room.Id, TestContext.Current.CancellationToken);
+        var result = await fixture.Service.JoinRoomAsync(
+            new JoinRoomCommand(
+                fixture.Room.InviteCode,
+                "Different name"),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.Joined);
+        Assert.Empty(fixture.Events);
+        Assert.Null(fixture.Publisher.LastJoinedMember);
+
+        var member = Assert.Single(
+            fixture.Room.Members,
+            x => x.GuestId == fixture.MemberId);
+
+        Assert.Equal("Member", member.DisplayName);
+    }
+
+    [Fact]
+    public async Task LeaveMember_SavesBeforePublishing()
+    {
+        var fixture = new Fixture();
+        fixture.Guest.GuestId = fixture.MemberId;
+
+        await fixture.Service.LeaveRoomAsync(
+            fixture.Room.Id,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            new[] { "save", "revoke-member" },
+            new[] { "save", "member-left" },
             fixture.Events);
 
         Assert.Equal(
             fixture.MemberId,
-            fixture.Notifier.LastRevokedGuestId);
+            fixture.Publisher.LastGuestId);
+
+        Assert.Null(fixture.Room.GetRole(fixture.MemberId));
+        Assert.Equal(RoomStatus.Active, fixture.Room.Status);
     }
 
     [Fact]
-    public async Task LeaveSoleOwner_ClosesRoomAndRevokesRoom()
+    public async Task LeaveSoleOwner_PublishesOnlyRoomClosed()
     {
         var fixture = new Fixture(joinMember: false);
 
-        await fixture.Service.LeaveRoomAsync(fixture.Room.Id, TestContext.Current.CancellationToken);
+        await fixture.Service.LeaveRoomAsync(
+            fixture.Room.Id,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(RoomStatus.Closed, fixture.Room.Status);
 
         Assert.Equal(
-            new[] { "save", "revoke-room" },
+            new[] { "save", "room-closed" },
             fixture.Events);
+
+        Assert.Equal(
+            fixture.Room.Id,
+            fixture.Publisher.LastRoomId);
     }
 
     [Fact]
-    public async Task RemoveMember_SavesBeforeRevocation()
+    public async Task RemoveMember_SavesBeforePublishing()
     {
         var fixture = new Fixture();
 
-        await fixture.Service.RemoveMemberAsync(fixture.Room.Id, fixture.MemberId, TestContext.Current.CancellationToken);
+        await fixture.Service.RemoveMemberAsync(
+            fixture.Room.Id,
+            fixture.MemberId,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            new[] { "save", "revoke-member" },
+            new[] { "save", "member-removed" },
             fixture.Events);
 
         Assert.Equal(
             fixture.MemberId,
-            fixture.Notifier.LastRevokedGuestId);
+            fixture.Publisher.LastGuestId);
+
+        Assert.Null(fixture.Room.GetRole(fixture.MemberId));
     }
 
     [Fact]
-    public async Task CloseRoom_SavesBeforeRevocation()
+    public async Task TransferOwnership_PublishesBothOwnerIds()
     {
         var fixture = new Fixture();
 
-        await fixture.Service.CloseRoomAsync(fixture.Room.Id, TestContext.Current.CancellationToken);
+        await fixture.Service.TransferOwnershipAsync(
+            fixture.Room.Id,
+            fixture.MemberId,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            new[] { "save", "revoke-room" },
+            new[] { "save", "owner-changed" },
             fixture.Events);
-
-        Assert.Equal(RoomStatus.Closed, fixture.Room.Status);
-    }
-
-    [Fact]
-    public async Task TransferOwnership_DoesNotChangePresence()
-    {
-        var fixture = new Fixture();
-
-        await fixture.Service.TransferOwnershipAsync(fixture.Room.Id, fixture.MemberId, TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            new[] { "save" },
-            fixture.Events);
+            fixture.OwnerId,
+            fixture.Publisher.LastPreviousOwnerId);
+
+        Assert.Equal(
+            fixture.MemberId,
+            fixture.Publisher.LastNewOwnerId);
 
         Assert.Equal(
             fixture.MemberId,
@@ -92,11 +166,43 @@ public sealed class RoomApplicationRealtimeTests
     }
 
     [Fact]
-    public async Task CreateRoom_DoesNotNotifyPresence()
+    public async Task RepeatedOwnershipTransfer_DoesNotPublish()
     {
         var fixture = new Fixture();
 
-        await fixture.Service.CreateRoomAsync(new CreateRoomCommand("New room", "Owner"), TestContext.Current.CancellationToken);
+        await fixture.Service.TransferOwnershipAsync(
+            fixture.Room.Id,
+            fixture.OwnerId,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(fixture.Events);
+        Assert.Equal(fixture.OwnerId, fixture.Room.OwnerGuestId);
+    }
+
+    [Fact]
+    public async Task CloseRoom_SavesBeforePublishing()
+    {
+        var fixture = new Fixture();
+
+        await fixture.Service.CloseRoomAsync(
+            fixture.Room.Id,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(RoomStatus.Closed, fixture.Room.Status);
+
+        Assert.Equal(
+            new[] { "save", "room-closed" },
+            fixture.Events);
+    }
+
+    [Fact]
+    public async Task CreateRoom_DoesNotPublish()
+    {
+        var fixture = new Fixture();
+
+        await fixture.Service.CreateRoomAsync(
+            new CreateRoomCommand("New room", "Owner"),
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
             new[] { "save" },
@@ -104,73 +210,166 @@ public sealed class RoomApplicationRealtimeTests
     }
 
     [Fact]
-    public async Task JoinRoom_DoesNotNotifyPresence()
+    public async Task GetRoom_DoesNotPublish()
+    {
+        var fixture = new Fixture();
+
+        await fixture.Service.GetRoomAsync(
+            fixture.Room.Id,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(fixture.Events);
+    }
+
+    [Fact]
+    public async Task Join_SaveFailure_DoesNotPublish()
+    {
+        var fixture = new Fixture(joinMember: false);
+        fixture.Guest.GuestId = fixture.MemberId;
+        fixture.Repository.FailSave = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.JoinRoomAsync(
+                new JoinRoomCommand(
+                    fixture.Room.InviteCode,
+                    "Member"),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(
+            new[] { "save" },
+            fixture.Events);
+    }
+
+    [Fact]
+    public async Task Leave_SaveFailure_DoesNotPublish()
+    {
+        var fixture = new Fixture();
+        fixture.Guest.GuestId = fixture.MemberId;
+        fixture.Repository.FailSave = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.LeaveRoomAsync(
+                fixture.Room.Id,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(
+            new[] { "save" },
+            fixture.Events);
+    }
+
+    [Fact]
+    public async Task Close_SaveFailure_DoesNotPublish()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.FailSave = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.CloseRoomAsync(
+                fixture.Room.Id,
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(
+            new[] { "save" },
+            fixture.Events);
+    }
+
+    [Fact]
+    public async Task ConcurrencyConflict_DoesNotPublish()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.FailConcurrency = true;
+
+        var exception =
+            await Assert.ThrowsAsync<RoomApplicationException>(
+                () => fixture.Service.TransferOwnershipAsync(
+                    fixture.Room.Id,
+                    fixture.MemberId,
+                    TestContext.Current.CancellationToken));
+
+        Assert.Equal(
+            ApplicationErrorCode.ConcurrencyConflict,
+            exception.ErrorCode);
+
+        Assert.Equal(
+            new[] { "save" },
+            fixture.Events);
+    }
+
+    [Fact]
+    public async Task UnauthorizedGuest_DoesNotPublish()
+    {
+        var fixture = new Fixture();
+
+        fixture.Guest.GuestId = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<RoomApplicationException>(
+            () => fixture.Service.CloseRoomAsync(
+                fixture.Room.Id,
+                TestContext.Current.CancellationToken));
+
+        Assert.Empty(fixture.Events);
+    }
+
+    [Fact]
+    public async Task InvalidJoin_DoesNotPublish()
     {
         var fixture = new Fixture(joinMember: false);
         fixture.Guest.GuestId = fixture.MemberId;
 
-        var result = await fixture.Service.JoinRoomAsync(new JoinRoomCommand(
-                fixture.Room.InviteCode,
-                "Member"), TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<RoomApplicationException>(
+            () => fixture.Service.JoinRoomAsync(
+                new JoinRoomCommand(
+                    "invalid",
+                    "Member"),
+                TestContext.Current.CancellationToken));
 
-        Assert.True(result.Joined);
-
-        Assert.Equal(
-            new[] { "save" },
-            fixture.Events);
+        Assert.Empty(fixture.Events);
     }
 
     [Fact]
-    public async Task SaveFails_DoesNotRevokeMember()
+    public async Task PublisherFailure_DoesNotFailCommittedOperation()
     {
         var fixture = new Fixture();
-        fixture.Guest.GuestId = fixture.MemberId;
-        fixture.Repository.FailSave = true;
+        fixture.Publisher.FailPublication = true;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => fixture.Service.LeaveRoomAsync(fixture.Room.Id, TestContext.Current.CancellationToken));
+        await fixture.Service.RemoveMemberAsync(
+            fixture.Room.Id,
+            fixture.MemberId,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            new[] { "save" },
+            new[] { "save", "member-removed" },
             fixture.Events);
+
+        Assert.Equal(1, fixture.Repository.SaveCount);
+        Assert.Null(fixture.Room.GetRole(fixture.MemberId));
     }
 
     [Fact]
-    public async Task SaveFails_DoesNotRevokeRoom()
+    public async Task ClosedEventFailure_DoesNotFailCommit()
     {
         var fixture = new Fixture();
-        fixture.Repository.FailSave = true;
+        fixture.Publisher.FailPublication = true;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => fixture.Service.CloseRoomAsync(fixture.Room.Id, TestContext.Current.CancellationToken));
+        await fixture.Service.CloseRoomAsync(
+            fixture.Room.Id,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            new[] { "save" },
+            new[] { "save", "room-closed" },
             fixture.Events);
+
+        Assert.Equal(RoomStatus.Closed, fixture.Room.Status);
+        Assert.Equal(1, fixture.Repository.SaveCount);
     }
 
     [Fact]
-    public async Task NotifierFailure_DoesNotFailCommittedOperation()
+    public async Task CancellationAfterSave_DoesNotSkipPublication()
     {
         var fixture = new Fixture();
 
-        fixture.Notifier.FailRevocation = true;
-
-        await fixture.Service.RemoveMemberAsync(fixture.Room.Id, fixture.MemberId, TestContext.Current.CancellationToken);
-
-        Assert.Equal(
-            new[] { "save", "revoke-member" },
-            fixture.Events);
-
-        Assert.Null(
-            fixture.Room.GetRole(fixture.MemberId));
-    }
-
-    [Fact]
-    public async Task CancellationAfterSave_DoesNotSkipRevocation()
-    {
-        var fixture = new Fixture();
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation =
+            new CancellationTokenSource();
 
         fixture.Repository.AfterSave = cancellation.Cancel;
 
@@ -182,12 +381,11 @@ public sealed class RoomApplicationRealtimeTests
         Assert.True(cancellation.IsCancellationRequested);
 
         Assert.Equal(
-            new[] { "save", "revoke-member" },
+            new[] { "save", "member-removed" },
             fixture.Events);
 
         Assert.False(
-            fixture.Notifier.LastCancellationToken
-                .CanBeCanceled);
+            fixture.Publisher.LastCancellationToken.CanBeCanceled);
     }
 
     [Fact]
@@ -195,8 +393,10 @@ public sealed class RoomApplicationRealtimeTests
     {
         var fixture = new Fixture();
 
-        await Assert.ThrowsAnyAsync<Exception>(
-            () => fixture.Service.LeaveRoomAsync(fixture.Room.Id, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<RoomApplicationException>(
+            () => fixture.Service.LeaveRoomAsync(
+                fixture.Room.Id,
+                TestContext.Current.CancellationToken));
 
         Assert.Empty(fixture.Events);
     }
@@ -230,7 +430,7 @@ public sealed class RoomApplicationRealtimeTests
                 Room = Room
             };
 
-            Notifier = new FakeNotifier(this);
+            Publisher = new FakeRealtimePublisher(this);
 
             Guest = new FakeGuest
             {
@@ -243,22 +443,16 @@ public sealed class RoomApplicationRealtimeTests
                 new FakeInviteCodeGenerator(),
                 TimeProvider.System,
                 new RoomSettings { Capacity = 10 },
-                Notifier,
+                Publisher,
                 NullLogger<RoomApplicationService>.Instance);
         }
 
         public Guid OwnerId { get; }
-
         public Guid MemberId { get; }
-
         public Room Room { get; }
-
         public FakeGuest Guest { get; }
-
         public FakeRepository Repository { get; }
-
-        public FakeNotifier Notifier { get; }
-
+        public FakeRealtimePublisher Publisher { get; }
         public RoomApplicationService Service { get; }
 
         public List<string> Events { get; } = [];
@@ -269,7 +463,8 @@ public sealed class RoomApplicationRealtimeTests
         public Guid? GuestId { get; set; }
     }
 
-    private sealed class FakeInviteCodeGenerator : IInviteCodeGenerator
+    private sealed class FakeInviteCodeGenerator
+        : IInviteCodeGenerator
     {
         public string Generate() => new('b', 22);
     }
@@ -284,10 +479,10 @@ public sealed class RoomApplicationRealtimeTests
         }
 
         public Room? Room { get; set; }
-
         public bool FailSave { get; set; }
-
+        public bool FailConcurrency { get; set; }
         public Action? AfterSave { get; set; }
+        public int SaveCount { get; private set; }
 
         public Task<Room?> GetByIdAsync(
             Guid roomId,
@@ -314,6 +509,7 @@ public sealed class RoomApplicationRealtimeTests
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
             Room = room;
             return Task.CompletedTask;
         }
@@ -323,7 +519,14 @@ public sealed class RoomApplicationRealtimeTests
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            SaveCount++;
             _fixture.Events.Add("save");
+
+            if (FailConcurrency)
+            {
+                throw new RoomConcurrencyException(
+                    "Simulated concurrency conflict.");
+            }
 
             if (FailSave)
             {
@@ -337,16 +540,28 @@ public sealed class RoomApplicationRealtimeTests
         }
     }
 
-    private sealed class FakeNotifier : IRoomPresenceNotifier
+    private sealed class FakeRealtimePublisher
+        : IRoomRealtimePublisher
     {
         private readonly Fixture _fixture;
 
-        public FakeNotifier(Fixture fixture)
+        public FakeRealtimePublisher(Fixture fixture)
         {
             _fixture = fixture;
         }
 
-        public Guid? LastRevokedGuestId { get; private set; }
+        public bool FailPublication { get; set; }
+
+        public Guid? LastRoomId { get; private set; }
+        public Guid? LastGuestId { get; private set; }
+        public Guid? LastPreviousOwnerId { get; private set; }
+        public Guid? LastNewOwnerId { get; private set; }
+
+        public RoomMemberRealtimeData? LastJoinedMember
+        {
+            get;
+            private set;
+        }
 
         public CancellationToken LastCancellationToken
         {
@@ -354,38 +569,84 @@ public sealed class RoomApplicationRealtimeTests
             private set;
         }
 
-        public bool FailRevocation { get; set; }
+        public Task MemberJoinedAsync(
+            Guid roomId,
+            RoomMemberRealtimeData member,
+            CancellationToken cancellationToken = default)
+        {
+            LastJoinedMember = member;
 
-        public Task RevokeMemberAsync(
+            return Record(
+                "member-joined",
+                roomId,
+                cancellationToken);
+        }
+
+        public Task MemberLeftAsync(
             Guid roomId,
             Guid guestId,
             CancellationToken cancellationToken = default)
         {
-            _fixture.Events.Add("revoke-member");
+            LastGuestId = guestId;
 
-            LastRevokedGuestId = guestId;
-            LastCancellationToken = cancellationToken;
-
-            return CompleteRevocation();
+            return Record(
+                "member-left",
+                roomId,
+                cancellationToken);
         }
 
-        public Task RevokeRoomAsync(
+        public Task MemberRemovedAsync(
+            Guid roomId,
+            Guid guestId,
+            CancellationToken cancellationToken = default)
+        {
+            LastGuestId = guestId;
+
+            return Record(
+                "member-removed",
+                roomId,
+                cancellationToken);
+        }
+
+        public Task OwnerChangedAsync(
+            Guid roomId,
+            Guid previousOwnerGuestId,
+            Guid newOwnerGuestId,
+            CancellationToken cancellationToken = default)
+        {
+            LastPreviousOwnerId = previousOwnerGuestId;
+            LastNewOwnerId = newOwnerGuestId;
+
+            return Record(
+                "owner-changed",
+                roomId,
+                cancellationToken);
+        }
+
+        public Task RoomClosedAsync(
             Guid roomId,
             CancellationToken cancellationToken = default)
         {
-            _fixture.Events.Add("revoke-room");
-
-            LastCancellationToken = cancellationToken;
-
-            return CompleteRevocation();
+            return Record(
+                "room-closed",
+                roomId,
+                cancellationToken);
         }
 
-        private Task CompleteRevocation()
+        private Task Record(
+            string eventName,
+            Guid roomId,
+            CancellationToken cancellationToken)
         {
-            if (FailRevocation)
+            LastRoomId = roomId;
+            LastCancellationToken = cancellationToken;
+
+            _fixture.Events.Add(eventName);
+
+            if (FailPublication)
             {
                 throw new InvalidOperationException(
-                    "Simulated Realtime failure.");
+                    "Simulated Realtime publication failure.");
             }
 
             return Task.CompletedTask;
