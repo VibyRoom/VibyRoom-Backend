@@ -29,15 +29,24 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
             return false;
         }
 
+        ApplicationErrorCode? applicationErrorCode = exception switch
+        {
+            RoomApplicationException roomException =>
+                roomException.ErrorCode,
+
+            MusicCatalogApplicationException musicException =>
+                musicException.ErrorCode,
+
+            _ => null
+        };
+
         ProblemDetails problem;
         string errorCode;
 
-        if (exception is RoomApplicationException applicationException)
+        if (applicationErrorCode is { } code)
         {
-            errorCode = applicationException.ErrorCode.ToString();
-
-            problem = CreateApplicationProblem(
-                applicationException.ErrorCode);
+            errorCode = code.ToString();
+            problem = CreateApplicationProblem(code);
         }
         else
         {
@@ -58,7 +67,8 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
         }
 
         problem.Extensions["code"] = errorCode;
-        problem.Extensions["traceId"] = httpContext.TraceIdentifier;
+        problem.Extensions["traceId"] =
+            httpContext.TraceIdentifier;
 
         httpContext.Response.StatusCode =
             problem.Status ?? StatusCodes.Status500InternalServerError;
@@ -157,6 +167,34 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
                     "The invitation could not be created due to a conflict."
                 ),
 
+            ApplicationErrorCode.TrackNotFound =>
+                (
+                    StatusCodes.Status404NotFound,
+                    "Track not found",
+                    "The requested music track is unavailable."
+                ),
+
+            ApplicationErrorCode.UnsupportedMusicProvider =>
+                (
+                    StatusCodes.Status400BadRequest,
+                    "Unsupported music provider",
+                    "The specified music provider is not supported."
+                ),
+
+            ApplicationErrorCode.MusicProviderUnavailable =>
+                (
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Music provider unavailable",
+                    "The music catalog is temporarily unavailable."
+                ),
+
+            ApplicationErrorCode.MusicProviderRateLimited =>
+                (
+                    StatusCodes.Status503ServiceUnavailable,
+                    "Music provider rate limited",
+                    "The music catalog request limit has been reached."
+                ),
+
             _ => throw new ArgumentOutOfRangeException(
                 nameof(code),
                 code,
@@ -165,7 +203,8 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
 
         return new ProblemDetails
         {
-            Type = $"urn:vibyroom:problem:{code.ToString().ToLowerInvariant()}",
+            Type =
+                $"urn:vibyroom:problem:{code.ToString().ToLowerInvariant()}",
             Title = title,
             Status = status,
             Detail = detail

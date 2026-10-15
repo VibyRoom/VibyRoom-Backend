@@ -54,7 +54,6 @@ public static class RoomRateLimitingExtensions
                                 QueueProcessingOrder.OldestFirst,
 
                             QueueLimit = 0,
-
                             AutoReplenishment = false
                         });
                 });
@@ -67,10 +66,8 @@ public static class RoomRateLimitingExtensions
                         .RemoteIpAddress?
                         .ToString() ?? "unknown";
 
-                    var partitionKey = $"ip:{remoteAddress}";
-
                     return RateLimitPartition.GetFixedWindowLimiter(
-                        partitionKey,
+                        $"ip:{remoteAddress}",
                         _ => new FixedWindowRateLimiterOptions
                         {
                             PermitLimit =
@@ -83,10 +80,28 @@ public static class RoomRateLimitingExtensions
                                 QueueProcessingOrder.OldestFirst,
 
                             QueueLimit = 0,
-
                             AutoReplenishment = false
                         });
                 });
+
+            options.AddPolicy(
+                RoomRateLimitOptions.MusicCatalogPolicy,
+                _ => RateLimitPartition.GetFixedWindowLimiter(
+                    "music:global",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit =
+                            settings.MusicCatalogPermitLimit,
+
+                        Window = TimeSpan.FromSeconds(
+                            settings.MusicCatalogWindowSeconds),
+
+                        QueueProcessingOrder =
+                            QueueProcessingOrder.OldestFirst,
+
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
 
             options.OnRejected = async (
                 context,
@@ -106,7 +121,8 @@ public static class RoomRateLimitingExtensions
                 {
                     var seconds = Math.Max(
                         1,
-                        (int)Math.Ceiling(retryAfter.TotalSeconds));
+                        (int)Math.Ceiling(
+                            retryAfter.TotalSeconds));
 
                     httpContext.Response.Headers.RetryAfter =
                         seconds.ToString(
@@ -121,7 +137,8 @@ public static class RoomRateLimitingExtensions
                     Detail = "The request rate limit was exceeded."
                 };
 
-                problem.Extensions["code"] = "RateLimitExceeded";
+                problem.Extensions["code"] =
+                    "RateLimitExceeded";
 
                 problem.Extensions["traceId"] =
                     httpContext.TraceIdentifier;
@@ -162,6 +179,18 @@ public static class RoomRateLimitingExtensions
         {
             throw new InvalidOperationException(
                 "InvitationAccessWindowSeconds must be positive.");
+        }
+
+        if (settings.MusicCatalogPermitLimit <= 0)
+        {
+            throw new InvalidOperationException(
+                "MusicCatalogPermitLimit must be positive.");
+        }
+
+        if (settings.MusicCatalogWindowSeconds <= 0)
+        {
+            throw new InvalidOperationException(
+                "MusicCatalogWindowSeconds must be positive.");
         }
     }
 }

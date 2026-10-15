@@ -13,5 +13,9 @@ public enum ApplicationErrorCode
     OwnerTransferRequired,
     RoomClosed,
     ConcurrencyConflict,
-    InviteCodeConflict
+    InviteCodeConflict,
+    TrackNotFound,
+    UnsupportedMusicProvider,
+    MusicProviderUnavailable,
+    MusicProviderRateLimited
 }
