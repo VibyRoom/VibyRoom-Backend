@@ -21,6 +21,26 @@ public sealed class RecordingRoomHubContext
         string, ConcurrentQueue<RoomSubscriptionRevoked>>
         _revocations = new(StringComparer.Ordinal);
 
+    private readonly ConcurrentDictionary<
+        string, ConcurrentQueue<RoomMemberJoined>>
+        _memberJoined = new(StringComparer.Ordinal);
+
+    private readonly ConcurrentDictionary<
+        string, ConcurrentQueue<RoomMemberLeft>>
+        _memberLeft = new(StringComparer.Ordinal);
+
+    private readonly ConcurrentDictionary<
+        string, ConcurrentQueue<RoomMemberRemoved>>
+        _memberRemoved = new(StringComparer.Ordinal);
+
+    private readonly ConcurrentDictionary<
+        string, ConcurrentQueue<RoomOwnerChanged>>
+        _ownerChanged = new(StringComparer.Ordinal);
+
+    private readonly ConcurrentDictionary<
+        string, ConcurrentQueue<RoomClosed>>
+        _roomClosed = new(StringComparer.Ordinal);
+
     public RecordingRoomHubContext()
     {
         Clients = new RecordingClients(this);
@@ -37,25 +57,37 @@ public sealed class RecordingRoomHubContext
 
     public bool FailPresenceDelivery { get; set; }
 
+    public bool FailRoomEventDelivery { get; set; }
+
     public Action? AfterAdd { get; set; }
 
     public IReadOnlyList<RoomPresenceSnapshot> PresenceFor(
-        string connectionId)
-    {
-        return _presence.TryGetValue(
-            connectionId, out var events)
-            ? events.ToArray()
-            : [];
-    }
+        string connectionId) =>
+        GetEvents(_presence, connectionId);
 
     public IReadOnlyList<RoomSubscriptionRevoked> RevocationsFor(
-        string connectionId)
-    {
-        return _revocations.TryGetValue(
-            connectionId, out var events)
-            ? events.ToArray()
-            : [];
-    }
+        string connectionId) =>
+        GetEvents(_revocations, connectionId);
+
+    public IReadOnlyList<RoomMemberJoined> MemberJoinedFor(
+        string connectionId) =>
+        GetEvents(_memberJoined, connectionId);
+
+    public IReadOnlyList<RoomMemberLeft> MemberLeftFor(
+        string connectionId) =>
+        GetEvents(_memberLeft, connectionId);
+
+    public IReadOnlyList<RoomMemberRemoved> MemberRemovedFor(
+        string connectionId) =>
+        GetEvents(_memberRemoved, connectionId);
+
+    public IReadOnlyList<RoomOwnerChanged> OwnerChangedFor(
+        string connectionId) =>
+        GetEvents(_ownerChanged, connectionId);
+
+    public IReadOnlyList<RoomClosed> RoomClosedFor(
+        string connectionId) =>
+        GetEvents(_roomClosed, connectionId);
 
     public IReadOnlyList<string> ConnectionsInGroup(
         string groupName)
@@ -65,6 +97,30 @@ public sealed class RecordingRoomHubContext
             return _groups.TryGetValue(groupName, out var ids)
                 ? ids.Order(StringComparer.Ordinal).ToArray()
                 : [];
+        }
+    }
+
+    private static IReadOnlyList<T> GetEvents<T>(
+        ConcurrentDictionary<string, ConcurrentQueue<T>> storage,
+        string connectionId)
+    {
+        return storage.TryGetValue(connectionId, out var events)
+            ? events.ToArray()
+            : [];
+    }
+
+    private static void RecordEvent<T>(
+        ConcurrentDictionary<string, ConcurrentQueue<T>> storage,
+        IReadOnlyList<string> connectionIds,
+        T payload)
+    {
+        foreach (var connectionId in connectionIds)
+        {
+            storage
+                .GetOrAdd(
+                    connectionId,
+                    _ => new ConcurrentQueue<T>())
+                .Enqueue(payload);
         }
     }
 
@@ -205,18 +261,13 @@ public sealed class RecordingRoomHubContext
             if (_owner.FailPresenceDelivery)
             {
                 throw new InvalidOperationException(
-                    "Simulated delivery failure.");
+                    "Simulated presence delivery failure.");
             }
 
-            foreach (var connectionId in _connectionIds)
-            {
-                _owner._presence
-                    .GetOrAdd(
-                        connectionId,
-                        _ => new ConcurrentQueue<
-                            RoomPresenceSnapshot>())
-                    .Enqueue(snapshot);
-            }
+            RecordEvent(
+                _owner._presence,
+                _connectionIds,
+                snapshot);
 
             return Task.CompletedTask;
         }
@@ -224,17 +275,86 @@ public sealed class RecordingRoomHubContext
         public Task RoomSubscriptionRevoked(
             RoomSubscriptionRevoked payload)
         {
-            foreach (var connectionId in _connectionIds)
-            {
-                _owner._revocations
-                    .GetOrAdd(
-                        connectionId,
-                        _ => new ConcurrentQueue<
-                            RoomSubscriptionRevoked>())
-                    .Enqueue(payload);
-            }
+            RecordEvent(
+                _owner._revocations,
+                _connectionIds,
+                payload);
 
             return Task.CompletedTask;
+        }
+
+        public Task RoomMemberJoined(
+            RoomMemberJoined payload)
+        {
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._memberJoined,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+
+        public Task RoomMemberLeft(
+            RoomMemberLeft payload)
+        {
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._memberLeft,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+
+        public Task RoomMemberRemoved(
+            RoomMemberRemoved payload)
+        {
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._memberRemoved,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+
+        public Task RoomOwnerChanged(
+            RoomOwnerChanged payload)
+        {
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._ownerChanged,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+
+        public Task RoomClosed(
+            RoomClosed payload)
+        {
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._roomClosed,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+
+        private void ThrowIfRoomEventDeliveryFails()
+        {
+            if (_owner.FailRoomEventDelivery)
+            {
+                throw new InvalidOperationException(
+                    "Simulated room event delivery failure.");
+            }
         }
     }
 }

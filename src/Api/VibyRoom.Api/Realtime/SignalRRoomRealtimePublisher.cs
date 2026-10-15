@@ -1,0 +1,100 @@
+
+using VibyRoom.Api.Realtime.Contracts;
+using VibyRoom.Application.Abstractions.Realtime;
+
+namespace VibyRoom.Api.Realtime;
+
+public sealed class SignalRRoomRealtimePublisher
+    : IRoomRealtimePublisher
+{
+    private readonly RoomPresenceCoordinator _coordinator;
+
+    public SignalRRoomRealtimePublisher(
+        RoomPresenceCoordinator coordinator)
+    {
+        _coordinator = coordinator
+            ?? throw new ArgumentNullException(
+                nameof(coordinator));
+    }
+
+    public Task MemberJoinedAsync(
+        Guid roomId,
+        RoomMemberRealtimeData member,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(member);
+
+        var payload = new RoomMemberJoined(
+            roomId,
+            new RoomMemberEvent(
+                member.GuestId,
+                member.DisplayName,
+                member.JoinedAtUtc));
+
+        return _coordinator.PublishRoomEventAsync(
+            roomId,
+            client => client.RoomMemberJoined(payload),
+            cancellationToken);
+    }
+
+    public Task MemberLeftAsync(
+        Guid roomId,
+        Guid guestId,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new RoomMemberLeft(
+            roomId,
+            guestId);
+
+        return _coordinator.RevokeMemberAndPublishAsync(
+            roomId,
+            guestId,
+            client => client.RoomMemberLeft(payload),
+            cancellationToken);
+    }
+
+    public Task MemberRemovedAsync(
+        Guid roomId,
+        Guid guestId,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new RoomMemberRemoved(
+            roomId,
+            guestId);
+
+        return _coordinator.RevokeMemberAndPublishAsync(
+            roomId,
+            guestId,
+            client => client.RoomMemberRemoved(payload),
+            cancellationToken);
+    }
+
+    public Task OwnerChangedAsync(
+        Guid roomId,
+        Guid previousOwnerGuestId,
+        Guid newOwnerGuestId,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new RoomOwnerChanged(
+            roomId,
+            previousOwnerGuestId,
+            newOwnerGuestId);
+
+        return _coordinator.PublishRoomEventAsync(
+            roomId,
+            client => client.RoomOwnerChanged(payload),
+            cancellationToken);
+    }
+
+    public Task RoomClosedAsync(
+        Guid roomId,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new RoomClosed(roomId);
+
+        return _coordinator.PublishRoomClosedAndRevokeAsync(
+            roomId,
+            client => client.RoomClosed(payload),
+            cancellationToken);
+    }
+}

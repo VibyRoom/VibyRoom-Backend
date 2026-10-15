@@ -184,8 +184,6 @@ public sealed class RoomPresenceCoordinator :
                     return;
                 }
 
-                // Once cleanup starts, complete it even if
-                // the client disconnects during the operation.
                 await TryRemoveFromGroupAsync(
                     connectionId,
                     GetGroupName(roomId));
@@ -289,42 +287,12 @@ public sealed class RoomPresenceCoordinator :
 
         try
         {
-            // REST membership changes have already been committed.
-            // Ignore request cancellation during local cleanup.
+            // Membership changes have already been committed.
+            // Cleanup must not depend on HTTP request cancellation.
             await roomLock.WaitAsync(CancellationToken.None);
             acquired = true;
 
-            var revocation = _registry.RevokeGuest(
-                roomId,
-                guestId);
-
-            if (revocation.ConnectionIds.Count == 0)
-            {
-                return;
-            }
-
-            var groupName = GetGroupName(roomId);
-
-            foreach (var connectionId in revocation.ConnectionIds)
-            {
-                await TryRemoveFromGroupAsync(
-                    connectionId,
-                    groupName);
-            }
-
-            var payload = new RoomSubscriptionRevoked(
-                roomId,
-                RoomSubscriptionRevoked.MembershipEnded);
-
-            await NotifyRevokedConnectionsAsync(
-                revocation.ConnectionIds,
-                payload);
-
-            if (revocation.OnlineGuestsChanged)
-            {
-                await PublishPresenceChangedAsync(
-                    revocation.Snapshot);
-            }
+            await RevokeMemberCoreAsync(roomId, guestId);
         }
         catch (Exception exception)
         {
@@ -358,29 +326,7 @@ public sealed class RoomPresenceCoordinator :
             await roomLock.WaitAsync(CancellationToken.None);
             acquired = true;
 
-            var connectionIds = _registry.ClearRoom(roomId);
-
-            if (connectionIds.Count == 0)
-            {
-                return;
-            }
-
-            var groupName = GetGroupName(roomId);
-
-            foreach (var connectionId in connectionIds)
-            {
-                await TryRemoveFromGroupAsync(
-                    connectionId,
-                    groupName);
-            }
-
-            var payload = new RoomSubscriptionRevoked(
-                roomId,
-                RoomSubscriptionRevoked.RoomClosed);
-
-            await NotifyRevokedConnectionsAsync(
-                connectionIds,
-                payload);
+            await RevokeRoomCoreAsync(roomId);
         }
         catch (Exception exception)
         {
@@ -398,15 +344,223 @@ public sealed class RoomPresenceCoordinator :
         }
     }
 
+    public async Task PublishRoomEventAsync(
+        Guid roomId,
+        Func<IRoomHubClient, Task> publish,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRoom(roomId);
+        ArgumentNullException.ThrowIfNull(publish);
+
+        var roomLock = GetRoomLock(roomId);
+
+        await roomLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await PublishRoomEventCoreAsync(
+                roomId,
+                publish);
+        }
+        finally
+        {
+            roomLock.Release();
+        }
+    }
+
+    public async Task RevokeMemberAndPublishAsync(
+        Guid roomId,
+        Guid guestId,
+        Func<IRoomHubClient, Task> publish,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRoom(roomId);
+        ValidateGuest(guestId);
+        ArgumentNullException.ThrowIfNull(publish);
+
+        var roomLock = GetRoomLock(roomId);
+        var acquired = false;
+
+        try
+        {
+            // Use the same room lock as SubscribeToRoomAsync.
+            // Revocation and the following event publication
+            // are coordinated under one lock.
+            await roomLock.WaitAsync(CancellationToken.None);
+            acquired = true;
+
+            await RevokeMemberCoreAsync(
+                roomId,
+                guestId);
+
+            // The revoked guest is already excluded from
+            // the Registry-based recipient allowlist.
+            await PublishRoomEventCoreAsync(
+                roomId,
+                publish);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to revoke member and publish room event "
+                + "for room {RoomId} and guest {GuestId}.",
+                roomId,
+                guestId);
+        }
+        finally
+        {
+            if (acquired)
+            {
+                roomLock.Release();
+            }
+        }
+    }
+
+    public async Task PublishRoomClosedAndRevokeAsync(
+        Guid roomId,
+        Func<IRoomHubClient, Task> publish,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRoom(roomId);
+        ArgumentNullException.ThrowIfNull(publish);
+
+        var roomLock = GetRoomLock(roomId);
+        var acquired = false;
+
+        try
+        {
+            await roomLock.WaitAsync(CancellationToken.None);
+            acquired = true;
+
+            // Publish before Registry is cleared.
+            // Failed delivery must not prevent cleanup.
+            try
+            {
+                await PublishRoomEventCoreAsync(
+                    roomId,
+                    publish);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Failed to publish RoomClosed for room {RoomId}. "
+                    + "Subscriptions will still be revoked.",
+                    roomId);
+            }
+
+            await RevokeRoomCoreAsync(roomId);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to revoke room {RoomId} after closure.",
+                roomId);
+        }
+        finally
+        {
+            if (acquired)
+            {
+                roomLock.Release();
+            }
+        }
+    }
+
+    private async Task PublishRoomEventCoreAsync(
+        Guid roomId,
+        Func<IRoomHubClient, Task> publish)
+    {
+        // Caller must hold the room lock.
+        // SignalR groups are not an authorization mechanism.
+        var connectionIds = _registry.GetConnectionIds(roomId);
+
+        if (connectionIds.Count == 0)
+        {
+            return;
+        }
+
+        await publish(
+            _hubContext.Clients.Clients(connectionIds));
+    }
+
+    private async Task RevokeMemberCoreAsync(
+        Guid roomId,
+        Guid guestId)
+    {
+        // Registry exclusion happens before group cleanup.
+        var revocation = _registry.RevokeGuest(
+            roomId,
+            guestId);
+
+        if (revocation.ConnectionIds.Count == 0)
+        {
+            return;
+        }
+
+        var groupName = GetGroupName(roomId);
+
+        foreach (var connectionId in revocation.ConnectionIds)
+        {
+            await TryRemoveFromGroupAsync(
+                connectionId,
+                groupName);
+        }
+
+        var payload = new RoomSubscriptionRevoked(
+            roomId,
+            RoomSubscriptionRevoked.MembershipEnded);
+
+        await NotifyRevokedConnectionsAsync(
+            revocation.ConnectionIds,
+            payload);
+
+        if (revocation.OnlineGuestsChanged)
+        {
+            await PublishPresenceChangedAsync(
+                revocation.Snapshot);
+        }
+    }
+
+    private async Task RevokeRoomCoreAsync(
+        Guid roomId)
+    {
+        var connectionIds = _registry.ClearRoom(roomId);
+
+        if (connectionIds.Count == 0)
+        {
+            return;
+        }
+
+        var groupName = GetGroupName(roomId);
+
+        foreach (var connectionId in connectionIds)
+        {
+            await TryRemoveFromGroupAsync(
+                connectionId,
+                groupName);
+        }
+
+        var payload = new RoomSubscriptionRevoked(
+            roomId,
+            RoomSubscriptionRevoked.RoomClosed);
+
+        await NotifyRevokedConnectionsAsync(
+            connectionIds,
+            payload);
+    }
+
     private async Task PublishPresenceChangedAsync(
         RoomPresenceSnapshot snapshot)
     {
-        // Never broadcast private presence data directly to
-        // SignalR Groups. A failed group removal could leave
-        // an unauthorized connection inside a stale group.
+        // Never send private presence information directly
+        // to SignalR groups. A stale group may still contain
+        // a connection whose membership has been revoked.
         //
-        // Registry determines the active recipient allowlist.
-        // Caller holds the corresponding room semaphore.
+        // Registry provides the current recipient allowlist.
         var connectionIds = _registry.GetConnectionIds(
             snapshot.RoomId);
 
@@ -468,9 +622,9 @@ public sealed class RoomPresenceCoordinator :
         }
         catch (Exception exception)
         {
-            // Security: this connection is already excluded
-            // from Registry-driven event broadcasts, but may
-            // still physically remain in its SignalR group.
+            // An unsuccessful physical group removal does not
+            // restore authorization: the Registry allowlist
+            // has already been updated.
             _logger.LogError(
                 exception,
                 "SignalR group removal failed for {GroupName}. "
@@ -496,7 +650,8 @@ public sealed class RoomPresenceCoordinator :
         return _roomLocks[index];
     }
 
-    private SemaphoreSlim GetConnectionLock(string connectionId)
+    private SemaphoreSlim GetConnectionLock(
+        string connectionId)
     {
         var index = (
             StringComparer.Ordinal.GetHashCode(connectionId)

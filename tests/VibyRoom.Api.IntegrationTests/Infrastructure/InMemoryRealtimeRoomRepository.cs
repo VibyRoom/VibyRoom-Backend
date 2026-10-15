@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Application.Abstractions.Repositories;
 using VibyRoom.Domain.Core.Entities.Rooms;
 
@@ -7,6 +8,10 @@ namespace VibyRoom.Api.IntegrationTests.Realtime.Infrastructure;
 public sealed class InMemoryRealtimeRoomRepository : IRoomRepository
 {
     private readonly ConcurrentDictionary<Guid, Room> _rooms = new();
+
+    public bool FailSave { get; set; }
+
+    public bool FailConcurrency { get; set; }
 
     public Room SeedRoom(
         Guid ownerGuestId,
@@ -84,6 +89,18 @@ public sealed class InMemoryRealtimeRoomRepository : IRoomRepository
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (FailConcurrency)
+        {
+            throw new RoomConcurrencyException(
+                "Simulated concurrent room modification.");
+        }
+
+        if (FailSave)
+        {
+            throw new InvalidOperationException(
+                "Simulated persistence failure.");
+        }
 
         return Task.CompletedTask;
     }
