@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VibyRoom.Application.Abstractions.Rooms;
 using VibyRoom.Application.Configuration;
+using VibyRoom.Application.Music;
 using VibyRoom.Application.Rooms;
 
 namespace VibyRoom.Application;
@@ -37,6 +38,8 @@ public static class ApplicationExtensions
         services.AddScoped<
             IRoomMembershipQuery,
             RoomMembershipQuery>();
+
+        services.AddScoped<MusicCatalogService>();
 
         return services;
     }

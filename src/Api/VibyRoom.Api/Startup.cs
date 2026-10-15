@@ -60,7 +60,7 @@ public sealed class Startup
         services.AddGuestAntiforgery();
 
         services.AddApplication(_configuration);
-        services.AddInfrastructure();
+        services.AddInfrastructure(_configuration);
 
         var connectionString = _configuration
             .GetConnectionString("DefaultConnection");
