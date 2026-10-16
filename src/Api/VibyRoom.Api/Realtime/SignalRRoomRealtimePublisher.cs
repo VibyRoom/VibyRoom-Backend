@@ -1,6 +1,6 @@
-
 using VibyRoom.Api.Realtime.Contracts;
 using VibyRoom.Application.Abstractions.Realtime;
+using VibyRoom.Application.Contracts.Queue;
 
 namespace VibyRoom.Api.Realtime;
 
@@ -95,6 +95,23 @@ public sealed class SignalRRoomRealtimePublisher
         return _coordinator.PublishRoomClosedAndRevokeAsync(
             roomId,
             client => client.RoomClosed(payload),
+            cancellationToken);
+    }
+
+    public Task QueueChangedAsync(
+        RoomQueueDetails queue,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+
+        var payload = new QueueChanged(
+            queue.RoomId,
+            queue.Version,
+            queue.Items);
+
+        return _coordinator.PublishRoomEventAsync(
+            queue.RoomId,
+            client => client.QueueChanged(payload),
             cancellationToken);
     }
 }

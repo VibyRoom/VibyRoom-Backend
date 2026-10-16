@@ -122,6 +122,104 @@ namespace VibyRoom.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VibyRoom.Domain.Music.Queue.QueueItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AddedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("added_at_utc");
+
+                    b.Property<Guid>("AddedByGuestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("added_by_guest_id");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer")
+                        .HasColumnName("position");
+
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("room_id");
+
+                    b.PrimitiveCollection<string[]>("_artists")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("artists");
+
+                    b.Property<string>("_artworkUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("artwork_url");
+
+                    b.Property<long>("_durationMs")
+                        .HasColumnType("bigint")
+                        .HasColumnName("duration_ms");
+
+                    b.Property<string>("_externalUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("external_url");
+
+                    b.Property<string>("_provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("_title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("title");
+
+                    b.Property<string>("_trackId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("track_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_room_music_queue_items");
+
+                    b.HasIndex("RoomId");
+
+                    b.ToTable("room_music_queue_items", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_room_music_queue_items_duration", "duration_ms > 0");
+
+                            t.HasCheckConstraint("ck_room_music_queue_items_position", "position >= 0");
+
+                            t.HasCheckConstraint("ck_room_music_queue_items_title", "char_length(btrim(title)) BETWEEN 1 AND 300");
+                        });
+                });
+
+            modelBuilder.Entity("VibyRoom.Domain.Music.Queue.RoomMusicSession", b =>
+                {
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("room_id");
+
+                    b.Property<int>("MaxPendingItems")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_pending_items");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("RoomId")
+                        .HasName("pk_room_music_sessions");
+
+                    b.ToTable("room_music_sessions", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_room_music_sessions_max_pending", "max_pending_items > 0");
+
+                            t.HasCheckConstraint("ck_room_music_sessions_version", "version >= 0");
+                        });
+                });
+
             modelBuilder.Entity("VibyRoom.Domain.Core.Entities.Rooms.RoomMember", b =>
                 {
                     b.HasOne("VibyRoom.Domain.Core.Entities.Rooms.Room", null)
@@ -131,9 +229,34 @@ namespace VibyRoom.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("VibyRoom.Domain.Music.Queue.QueueItem", b =>
+                {
+                    b.HasOne("VibyRoom.Domain.Music.Queue.RoomMusicSession", null)
+                        .WithMany("PendingItems")
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_room_music_queue_items_sessions_room_id");
+                });
+
+            modelBuilder.Entity("VibyRoom.Domain.Music.Queue.RoomMusicSession", b =>
+                {
+                    b.HasOne("VibyRoom.Domain.Core.Entities.Rooms.Room", null)
+                        .WithOne()
+                        .HasForeignKey("VibyRoom.Domain.Music.Queue.RoomMusicSession", "RoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_room_music_sessions_rooms_room_id");
+                });
+
             modelBuilder.Entity("VibyRoom.Domain.Core.Entities.Rooms.Room", b =>
                 {
                     b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("VibyRoom.Domain.Music.Queue.RoomMusicSession", b =>
+                {
+                    b.Navigation("PendingItems");
                 });
 #pragma warning restore 612, 618
         }

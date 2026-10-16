@@ -17,5 +17,11 @@ public enum ApplicationErrorCode
     TrackNotFound,
     UnsupportedMusicProvider,
     MusicProviderUnavailable,
-    MusicProviderRateLimited
+    MusicProviderRateLimited,
+    QueueFull,
+    QueueItemNotFound,
+    InvalidQueuePosition,
+    TrackNotEligible,
+    QueueVersionMismatch,
+    QueuePreconditionRequired
 }

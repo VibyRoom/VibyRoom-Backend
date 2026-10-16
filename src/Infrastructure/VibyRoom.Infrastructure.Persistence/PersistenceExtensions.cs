@@ -19,6 +19,14 @@ public static class PersistenceExtensions
 
         services.AddScoped<IRoomRepository, RoomRepository>();
 
+        services.AddScoped<
+            IRoomMusicSessionRepository,
+            RoomMusicSessionRepository>();
+
+        services.AddScoped<
+            IRoomQueueWriteExecutor,
+            RoomQueueWriteExecutor>();
+
         return services;
     }
 }

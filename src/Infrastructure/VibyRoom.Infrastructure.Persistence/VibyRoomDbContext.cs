@@ -4,6 +4,7 @@ using Npgsql;
 using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Domain.Core.Entities.Rooms;
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
+using VibyRoom.Domain.Music.Queue;
 
 namespace VibyRoom.Infrastructure.Persistence;
 
@@ -21,6 +22,9 @@ public sealed class VibyRoomDbContext : DbContext
     }
 
     public DbSet<Room> Rooms => Set<Room>();
+
+    public DbSet<RoomMusicSession> RoomMusicSessions =>
+        Set<RoomMusicSession>();
 
     protected override void OnModelCreating(
         ModelBuilder modelBuilder)
@@ -44,16 +48,26 @@ public sealed class VibyRoomDbContext : DbContext
                 cancellationToken);
         }
         catch (DbUpdateConcurrencyException exception)
+            when (IsMusicSessionConflict(exception))
+        {
+            throw new RoomQueueConcurrencyException(
+                "The music queue was modified by another operation. " +
+                "Reload the queue before retrying.",
+                exception);
+        }
+        catch (DbUpdateConcurrencyException exception)
         {
             throw new RoomConcurrencyException(
-                "The room was modified by another operation. Reload the room and retry the operation.",
+                "The room was modified by another operation. " +
+                "Reload the room and retry the operation.",
                 exception);
         }
         catch (DbUpdateException exception)
             when (IsInviteCodeUniqueViolation(exception))
         {
             throw new RoomInviteCodeConflictException(
-                "A room with the generated invitation code already exists.",
+                "A room with the generated invitation code " +
+                "already exists.",
                 exception);
         }
     }
@@ -62,7 +76,15 @@ public sealed class VibyRoomDbContext : DbContext
         bool acceptAllChangesOnSuccess)
     {
         throw new NotSupportedException(
-            "Synchronous saving is not supported. Use SaveChangesAsync.");
+            "Synchronous saving is not supported. " +
+            "Use SaveChangesAsync.");
+    }
+
+    private static bool IsMusicSessionConflict(
+        DbUpdateConcurrencyException exception)
+    {
+        return exception.Entries.Any(entry =>
+            entry.Entity is RoomMusicSession or QueueItem);
     }
 
     private static bool IsInviteCodeUniqueViolation(
@@ -118,7 +140,8 @@ public sealed class VibyRoomDbContext : DbContext
         IReadOnlyDictionary<Guid, EntityEntry<Room>> roomsById,
         HashSet<Guid> changedRoomIds)
     {
-        foreach (var memberEntry in ChangeTracker.Entries<RoomMember>())
+        foreach (var memberEntry in
+                 ChangeTracker.Entries<RoomMember>())
         {
             if (memberEntry.State is not (
                     EntityState.Added
@@ -135,10 +158,13 @@ public sealed class VibyRoomDbContext : DbContext
                 ? roomIdProperty.OriginalValue
                 : roomIdProperty.CurrentValue;
 
-            if (!roomsById.TryGetValue(roomId, out var roomEntry))
+            if (!roomsById.TryGetValue(
+                    roomId,
+                    out var roomEntry))
             {
                 throw new InvalidOperationException(
-                    "RoomMember changes require a tracked Room aggregate.");
+                    "RoomMember changes require " +
+                    "a tracked Room aggregate.");
             }
 
             if (roomEntry.State == EntityState.Deleted)

@@ -61,8 +61,8 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
             };
 
             _logger.LogError(
-                "Unhandled API exception of type {ExceptionType}. TraceId: {TraceId}",
-                exception.GetType().FullName,
+                exception,
+                "Unhandled API exception. TraceId: {TraceId}",
                 httpContext.TraceIdentifier);
         }
 
@@ -157,7 +157,7 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
                 (
                     StatusCodes.Status409Conflict,
                     "Concurrency conflict",
-                    "The room was modified concurrently. Reload and retry."
+                    "The resource was modified concurrently. Reload and retry."
                 ),
 
             ApplicationErrorCode.InviteCodeConflict =>
@@ -193,6 +193,48 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
                     StatusCodes.Status503ServiceUnavailable,
                     "Music provider rate limited",
                     "The music catalog request limit has been reached."
+                ),
+
+            ApplicationErrorCode.QueueFull =>
+                (
+                    StatusCodes.Status409Conflict,
+                    "Queue is full",
+                    "The music queue has reached its maximum size."
+                ),
+
+            ApplicationErrorCode.QueueItemNotFound =>
+                (
+                    StatusCodes.Status404NotFound,
+                    "Queue item not found",
+                    "The requested queue item is unavailable."
+                ),
+
+            ApplicationErrorCode.InvalidQueuePosition =>
+                (
+                    StatusCodes.Status400BadRequest,
+                    "Invalid queue position",
+                    "The requested position is outside the queue."
+                ),
+
+            ApplicationErrorCode.TrackNotEligible =>
+                (
+                    StatusCodes.Status400BadRequest,
+                    "Track not eligible",
+                    "This track cannot be added to the music queue."
+                ),
+
+            ApplicationErrorCode.QueueVersionMismatch =>
+                (
+                    StatusCodes.Status412PreconditionFailed,
+                    "Queue version mismatch",
+                    "The queue has changed. Reload and retry."
+                ),
+
+            ApplicationErrorCode.QueuePreconditionRequired =>
+                (
+                    StatusCodes.Status428PreconditionRequired,
+                    "Queue precondition required",
+                    "A valid If-Match header is required."
                 ),
 
             _ => throw new ArgumentOutOfRangeException(

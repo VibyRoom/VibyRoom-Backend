@@ -41,6 +41,10 @@ public sealed class RecordingRoomHubContext
         string, ConcurrentQueue<RoomClosed>>
         _roomClosed = new(StringComparer.Ordinal);
 
+    private readonly ConcurrentDictionary<
+        string, ConcurrentQueue<QueueChanged>>
+        _queueChanged = new(StringComparer.Ordinal);
+
     public RecordingRoomHubContext()
     {
         Clients = new RecordingClients(this);
@@ -88,6 +92,10 @@ public sealed class RecordingRoomHubContext
     public IReadOnlyList<RoomClosed> RoomClosedFor(
         string connectionId) =>
         GetEvents(_roomClosed, connectionId);
+
+    public IReadOnlyList<QueueChanged> QueueChangedFor(
+        string connectionId) =>
+        GetEvents(_queueChanged, connectionId);
 
     public IReadOnlyList<string> ConnectionsInGroup(
         string groupName)
@@ -342,6 +350,19 @@ public sealed class RecordingRoomHubContext
 
             RecordEvent(
                 _owner._roomClosed,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+
+        public Task QueueChanged(
+            QueueChanged payload)
+        {
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._queueChanged,
                 _connectionIds,
                 payload);
 

@@ -5,6 +5,7 @@ using VibyRoom.Application.Abstractions.Invitations;
 using VibyRoom.Application.Abstractions.Repositories;
 using VibyRoom.Application.Abstractions.Realtime;
 using VibyRoom.Application.Configuration;
+using VibyRoom.Application.Contracts.Queue;
 using VibyRoom.Application.Contracts.Rooms;
 using VibyRoom.Application.Errors;
 using VibyRoom.Application.Rooms;
@@ -556,6 +557,7 @@ public sealed class RoomApplicationRealtimeTests
         public Guid? LastGuestId { get; private set; }
         public Guid? LastPreviousOwnerId { get; private set; }
         public Guid? LastNewOwnerId { get; private set; }
+        public RoomQueueDetails? LastQueue { get; private set; }
 
         public RoomMemberRealtimeData? LastJoinedMember
         {
@@ -630,6 +632,20 @@ public sealed class RoomApplicationRealtimeTests
             return Record(
                 "room-closed",
                 roomId,
+                cancellationToken);
+        }
+
+        public Task QueueChangedAsync(
+            RoomQueueDetails queue,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(queue);
+
+            LastQueue = queue;
+
+            return Record(
+                "queue-changed",
+                queue.RoomId,
                 cancellationToken);
         }
 
