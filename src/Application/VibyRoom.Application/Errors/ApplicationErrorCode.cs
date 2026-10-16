@@ -27,5 +27,8 @@ public enum ApplicationErrorCode
     QueueEmpty,
     InvalidPlaybackState,
     InvalidPlaybackPosition,
-    PlaybackNotActive
+    PlaybackNotActive,
+    TrackNotStreamable,
+    StreamAccessDenied,
+    PlaybackItemMismatch
 }

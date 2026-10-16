@@ -52,6 +52,7 @@ public static class ApplicationExtensions
         services.AddScoped<RoomApplicationService>();
         services.AddScoped<RoomQueueApplicationService>();
         services.AddScoped<RoomPlaybackApplicationService>();
+        services.AddScoped<MusicStreamApplicationService>();
 
         services.AddScoped<
             IRoomMembershipQuery,
