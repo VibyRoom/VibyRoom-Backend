@@ -19,6 +19,6 @@
     }
 
     handle {
-    reverse_proxy vibyroom-frontend:8080
-}
+        reverse_proxy vibyroom-frontend:8080
+    }
 }
