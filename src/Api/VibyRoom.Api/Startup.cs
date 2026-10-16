@@ -1,3 +1,5 @@
+using System.Net;
+using Microsoft.AspNetCore.HttpOverrides;
 using VibyRoom.Api.Authentication;
 using VibyRoom.Api.Background;
 using VibyRoom.Api.Errors;
@@ -71,8 +73,7 @@ public sealed class Startup
                 "Connection string 'DefaultConnection' is not configured.");
         }
 
-        services.AddInfrastructurePersistance(
-            connectionString);
+        services.AddInfrastructurePersistance(connectionString);
 
         services
             .AddOptions<PlaybackProgressionOptions>()
@@ -138,12 +139,36 @@ public sealed class Startup
                         .AllowCredentials();
                 });
         });
+
+        var knownProxy = _configuration["ReverseProxy:KnownProxy"];
+
+        if (!string.IsNullOrWhiteSpace(knownProxy))
+        {
+            if (!IPAddress.TryParse(
+                    knownProxy,
+                    out var proxyAddress))
+            {
+                throw new InvalidOperationException(
+                    "ReverseProxy:KnownProxy must be a valid IP address.");
+            }
+
+            services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders =
+                    ForwardedHeaders.XForwardedFor |
+                    ForwardedHeaders.XForwardedProto;
+
+                options.ForwardLimit = 1;
+                options.KnownProxies.Add(proxyAddress);
+            });
+        }
     }
 
     public void Configure(WebApplication app)
     {
         ArgumentNullException.ThrowIfNull(app);
 
+        app.UseForwardedHeaders();
         app.UseExceptionHandler();
 
         if (app.Environment.IsDevelopment())
