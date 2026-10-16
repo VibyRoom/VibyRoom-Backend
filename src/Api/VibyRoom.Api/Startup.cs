@@ -1,4 +1,5 @@
 using VibyRoom.Api.Authentication;
+using VibyRoom.Api.Background;
 using VibyRoom.Api.Errors;
 using VibyRoom.Api.OpenApi;
 using VibyRoom.Api.RateLimiting;
@@ -74,7 +75,26 @@ public sealed class Startup
         services.AddInfrastructurePersistance(
             connectionString);
 
-        // Realtime infrastructure.
+        // Server-side automatic playback progression.
+        services
+            .AddOptions<PlaybackProgressionOptions>()
+            .Bind(_configuration.GetSection(
+                PlaybackProgressionOptions.SectionName))
+            .Validate(
+                options =>
+                    options.IntervalMilliseconds is >= 100 and <= 60000,
+                "PlaybackProgression:IntervalMilliseconds must " +
+                "be between 100 and 60000.")
+            .Validate(
+                options =>
+                    options.BatchSize is >= 1 and <= 500,
+                "PlaybackProgression:BatchSize must " +
+                "be between 1 and 500.")
+            .ValidateOnStart();
+
+        services.AddHostedService<PlaybackProgressionWorker>();
+
+        // Existing realtime infrastructure.
         services.AddSignalR();
 
         services.AddSingleton<RoomPresenceRegistry>();
@@ -89,7 +109,6 @@ public sealed class Startup
             IRoomRealtimePublisher,
             SignalRRoomRealtimePublisher>();
 
-        // Explicitly configured allowed origins.
         var originPolicy = new RoomHubOriginPolicy(
             _configuration);
 
@@ -136,7 +155,6 @@ public sealed class Startup
 
         app.UseRouting();
 
-        // WebSocket Origin protection.
         var originPolicy = app.Services
             .GetRequiredService<RoomHubOriginPolicy>();
 
@@ -161,10 +179,8 @@ public sealed class Startup
 
         app.UseRateLimiter();
 
-        // REST: ControllerBase only.
         app.MapControllers();
 
-        // SignalR transport, not Minimal API.
         app.MapHub<RoomHub>("/hubs/rooms")
             .RequireCors(
                 RoomHubOriginPolicy.CorsPolicyName);

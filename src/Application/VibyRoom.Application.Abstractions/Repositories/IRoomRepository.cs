@@ -18,4 +18,19 @@ public interface IRoomRepository
 
     Task SaveChangesAsync(
         CancellationToken cancellationToken = default);
+
+    async Task<Room> ExecuteLifecycleMutationAsync(
+        Guid roomId,
+        Func<Room?, Room> mutation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(mutation);
+
+        var room = await GetByIdAsync(roomId, cancellationToken);
+        var result = mutation(room);
+
+        await SaveChangesAsync(cancellationToken);
+
+        return result;
+    }
 }

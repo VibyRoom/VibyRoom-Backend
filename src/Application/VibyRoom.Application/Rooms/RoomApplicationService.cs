@@ -1,3 +1,4 @@
+using VibyRoom.Domain.Music.Queue.Exceptions;
 using Microsoft.Extensions.Logging;
 using VibyRoom.Application.Abstractions.Authentication;
 using VibyRoom.Application.Abstractions.Exceptions;
@@ -219,23 +220,23 @@ public sealed class RoomApplicationService
     {
         var guestId = RequireCurrentGuest();
 
-        var room = await GetActiveMemberRoomAsync(
+        var room = await ExecuteLifecycleMutationAsync(
             roomId,
             guestId,
+            current =>
+            {
+                try
+                {
+                    current.Leave(guestId);
+                }
+                catch (RoomDomainException exception)
+                {
+                    throw MapDomainException(
+                        exception,
+                        memberNotFoundCode: ApplicationErrorCode.NotMember);
+                }
+            },
             cancellationToken);
-
-        try
-        {
-            room.Leave(guestId);
-        }
-        catch (RoomDomainException exception)
-        {
-            throw MapDomainException(
-                exception,
-                memberNotFoundCode: ApplicationErrorCode.NotMember);
-        }
-
-        await SaveChangesAsync(cancellationToken);
 
         if (room.Status == RoomStatus.Closed)
         {
@@ -358,23 +359,23 @@ public sealed class RoomApplicationService
     {
         var guestId = RequireCurrentGuest();
 
-        var room = await GetActiveMemberRoomAsync(
+        await ExecuteLifecycleMutationAsync(
             roomId,
             guestId,
+            current =>
+            {
+                EnsureOwner(current, guestId);
+
+                try
+                {
+                    current.Close(guestId);
+                }
+                catch (RoomDomainException exception)
+                {
+                    throw MapDomainException(exception);
+                }
+            },
             cancellationToken);
-
-        EnsureOwner(room, guestId);
-
-        try
-        {
-            room.Close(guestId);
-        }
-        catch (RoomDomainException exception)
-        {
-            throw MapDomainException(exception);
-        }
-
-        await SaveChangesAsync(cancellationToken);
 
         await TryPublishEventAsync(
             roomId,
@@ -623,5 +624,51 @@ public sealed class RoomApplicationService
             errorCode,
             exception.Message,
             exception);
+    }
+    
+    private async Task<Room> ExecuteLifecycleMutationAsync(
+        Guid roomId,
+        Guid guestId,
+        Action<Room> mutation,
+        CancellationToken cancellationToken)
+    {
+        ValidateRoomId(roomId);
+        ArgumentNullException.ThrowIfNull(mutation);
+
+        try
+        {
+            return await _roomRepository.ExecuteLifecycleMutationAsync(
+                roomId,
+                room =>
+                {
+                    if (room is null ||
+                        room.Status != RoomStatus.Active ||
+                        room.GetRole(guestId) is null)
+                    {
+                        throw new RoomApplicationException(
+                            ApplicationErrorCode.RoomNotFound,
+                            "Room was not found.");
+                    }
+
+                    mutation(room);
+
+                    return room;
+                },
+                cancellationToken);
+        }
+        catch (RoomQueueConcurrencyException exception)
+        {
+            throw new RoomApplicationException(
+                ApplicationErrorCode.ConcurrencyConflict,
+                "Room music state was modified concurrently.",
+                exception);
+        }
+        catch (RoomConcurrencyException exception)
+        {
+            throw new RoomApplicationException(
+                ApplicationErrorCode.ConcurrencyConflict,
+                "Room was modified concurrently.",
+                exception);
+        }
     }
 }

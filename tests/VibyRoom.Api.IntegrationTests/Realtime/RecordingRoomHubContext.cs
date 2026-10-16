@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 using VibyRoom.Api.Realtime;
 using VibyRoom.Api.Realtime.Contracts;
+using VibyRoom.Application.Contracts.Playback;
 
 namespace VibyRoom.Api.IntegrationTests.Realtime;
 
@@ -44,6 +45,10 @@ public sealed class RecordingRoomHubContext
     private readonly ConcurrentDictionary<
         string, ConcurrentQueue<QueueChanged>>
         _queueChanged = new(StringComparer.Ordinal);
+    
+    private readonly ConcurrentDictionary<
+            string, ConcurrentQueue<RoomMusicStateDetails>>
+        _musicStateChanged = new(StringComparer.Ordinal);
 
     public RecordingRoomHubContext()
     {
@@ -96,6 +101,10 @@ public sealed class RecordingRoomHubContext
     public IReadOnlyList<QueueChanged> QueueChangedFor(
         string connectionId) =>
         GetEvents(_queueChanged, connectionId);
+    
+    public IReadOnlyList<RoomMusicStateDetails> MusicStateChangedFor(
+        string connectionId) =>
+        GetEvents(_musicStateChanged, connectionId);
 
     public IReadOnlyList<string> ConnectionsInGroup(
         string groupName)
@@ -363,6 +372,21 @@ public sealed class RecordingRoomHubContext
 
             RecordEvent(
                 _owner._queueChanged,
+                _connectionIds,
+                payload);
+
+            return Task.CompletedTask;
+        }
+        
+        public Task MusicStateChanged(
+            RoomMusicStateDetails payload)
+        {
+            ArgumentNullException.ThrowIfNull(payload);
+
+            ThrowIfRoomEventDeliveryFails();
+
+            RecordEvent(
+                _owner._musicStateChanged,
                 _connectionIds,
                 payload);
 

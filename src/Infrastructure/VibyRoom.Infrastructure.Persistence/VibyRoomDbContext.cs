@@ -5,6 +5,8 @@ using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Domain.Core.Entities.Rooms;
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
 using VibyRoom.Domain.Music.Queue;
+using VibyRoom.Domain.Music.Playback;
+using VibyRoom.Infrastructure.Persistence.Repositories;
 
 namespace VibyRoom.Infrastructure.Persistence;
 
@@ -40,6 +42,7 @@ public sealed class VibyRoomDbContext : DbContext
         CancellationToken cancellationToken = default)
     {
         PrepareAggregateChanges();
+        PreparePlaybackTransitions();
 
         try
         {
@@ -132,6 +135,27 @@ public sealed class VibyRoomDbContext : DbContext
                 or EntityState.Unchanged)
             {
                 PrepareExistingRoom(entry, now);
+            }
+        }
+    }
+
+    private void PreparePlaybackTransitions()
+    {
+        // The due-time projection participates in the same SaveChanges and
+        // transaction as queue items, playback, and the shared Version.
+        foreach (var entry in ChangeTracker.Entries<PlaybackState>())
+        {
+            if (entry.State is EntityState.Deleted or EntityState.Detached)
+            {
+                continue;
+            }
+
+            var property = entry.Property<DateTimeOffset?>("NextTransitionAtUtc");
+            var next = PlaybackTransitionCalculator.Calculate(entry.Entity);
+
+            if (property.CurrentValue != next)
+            {
+                property.CurrentValue = next;
             }
         }
     }

@@ -1,3 +1,4 @@
+using VibyRoom.Application.Contracts.Playback;
 using Microsoft.Extensions.Logging.Abstractions;
 using VibyRoom.Application.Abstractions.Authentication;
 using VibyRoom.Application.Abstractions.Exceptions;
@@ -646,6 +647,18 @@ public sealed class RoomApplicationRealtimeTests
             return Record(
                 "queue-changed",
                 queue.RoomId,
+                cancellationToken);
+        }
+        
+        public Task MusicStateChangedAsync(
+            RoomMusicStateDetails musicState,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(musicState);
+
+            return Record(
+                "music-state-changed",
+                musicState.RoomId,
                 cancellationToken);
         }
 
