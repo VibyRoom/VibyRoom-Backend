@@ -1,0 +1,24 @@
+{
+    default_sni {$SITE_DOMAIN}
+}
+
+{$SITE_DOMAIN}:8443 {
+    tls {
+        issuer acme {
+            profile shortlived
+            disable_tlsalpn_challenge
+        }
+    }
+
+    encode zstd gzip
+
+    @backend path /api/* /hubs/*
+
+    handle @backend {
+        reverse_proxy api:8080
+    }
+
+    handle {
+        respond "VibyRoom frontend is coming soon" 200
+    }
+}
