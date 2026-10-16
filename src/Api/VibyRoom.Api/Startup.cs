@@ -23,12 +23,10 @@ public sealed class Startup
         IHostEnvironment environment)
     {
         _configuration = configuration
-            ?? throw new ArgumentNullException(
-                nameof(configuration));
+            ?? throw new ArgumentNullException(nameof(configuration));
 
         _environment = environment
-            ?? throw new ArgumentNullException(
-                nameof(environment));
+            ?? throw new ArgumentNullException(nameof(environment));
     }
 
     public void ConfigureServices(IServiceCollection services)
@@ -41,12 +39,13 @@ public sealed class Startup
         {
             options.AddOperationTransformer<
                 AntiforgeryHeaderOpenApiTransformer>();
+
+            options.AddOperationTransformer<
+                IfMatchHeaderOpenApiTransformer>();
         });
 
         services.AddRoomApiErrorHandling();
-
         services.AddRoomRateLimiting(_configuration);
-
         services.AddHttpContextAccessor();
 
         services.AddScoped<
@@ -75,7 +74,6 @@ public sealed class Startup
         services.AddInfrastructurePersistance(
             connectionString);
 
-        // Server-side automatic playback progression.
         services
             .AddOptions<PlaybackProgressionOptions>()
             .Bind(_configuration.GetSection(
@@ -83,22 +81,18 @@ public sealed class Startup
             .Validate(
                 options =>
                     options.IntervalMilliseconds is >= 100 and <= 60000,
-                "PlaybackProgression:IntervalMilliseconds must " +
-                "be between 100 and 60000.")
+                "PlaybackProgression:IntervalMilliseconds must be between 100 and 60000.")
             .Validate(
                 options =>
                     options.BatchSize is >= 1 and <= 500,
-                "PlaybackProgression:BatchSize must " +
-                "be between 1 and 500.")
+                "PlaybackProgression:BatchSize must be between 1 and 500.")
             .ValidateOnStart();
 
         services.AddHostedService<PlaybackProgressionWorker>();
 
-        // Existing realtime infrastructure.
         services.AddSignalR();
 
         services.AddSingleton<RoomPresenceRegistry>();
-
         services.AddSingleton<RoomPresenceCoordinator>();
 
         services.AddSingleton<IRoomPresenceNotifier>(
@@ -116,13 +110,26 @@ public sealed class Startup
 
         services.AddCors(options =>
         {
+            options.AddDefaultPolicy(policy =>
+            {
+                policy
+                    .WithOrigins(originPolicy.AllowedOrigins.ToArray())
+                    .WithMethods(
+                        "GET",
+                        "POST",
+                        "PUT",
+                        "PATCH",
+                        "DELETE")
+                    .AllowAnyHeader()
+                    .AllowCredentials();
+            });
+
             options.AddPolicy(
                 RoomHubOriginPolicy.CorsPolicyName,
                 policy =>
                 {
                     policy
-                        .WithOrigins(
-                            originPolicy.AllowedOrigins.ToArray())
+                        .WithOrigins(originPolicy.AllowedOrigins.ToArray())
                         .WithMethods(
                             "GET",
                             "POST",
@@ -152,7 +159,6 @@ public sealed class Startup
         }
 
         app.UseHttpsRedirection();
-
         app.UseRouting();
 
         var originPolicy = app.Services
@@ -166,23 +172,18 @@ public sealed class Startup
         }
 
         app.UseWebSockets(webSocketOptions);
-
         app.UseMiddleware<RoomHubOriginMiddleware>();
 
         app.UseCors();
 
         app.UseAuthentication();
-
         app.UseMiddleware<GuestAntiforgeryMiddleware>();
-
         app.UseAuthorization();
-
         app.UseRateLimiter();
 
         app.MapControllers();
 
         app.MapHub<RoomHub>("/hubs/rooms")
-            .RequireCors(
-                RoomHubOriginPolicy.CorsPolicyName);
+            .RequireCors(RoomHubOriginPolicy.CorsPolicyName);
     }
 }

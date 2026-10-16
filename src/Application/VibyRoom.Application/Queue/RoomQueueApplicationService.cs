@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using VibyRoom.Application.Abstractions.Authentication;
 using VibyRoom.Application.Abstractions.Exceptions;
+using VibyRoom.Application.Abstractions.Music;
 using VibyRoom.Application.Abstractions.Repositories;
 using VibyRoom.Application.Abstractions.Realtime;
 using VibyRoom.Application.Configuration;
@@ -27,6 +28,7 @@ public sealed class RoomQueueApplicationService
     private readonly IRoomQueueWriteExecutor _writer;
     private readonly ICurrentGuest _currentGuest;
     private readonly MusicCatalogService _catalog;
+    private readonly IMusicStreamProvider _streamProvider;
     private readonly TimeProvider _timeProvider;
     private readonly RoomQueueSettings _settings;
     private readonly IRoomRealtimePublisher _realtime;
@@ -38,6 +40,7 @@ public sealed class RoomQueueApplicationService
         IRoomQueueWriteExecutor writer,
         ICurrentGuest currentGuest,
         MusicCatalogService catalog,
+        IMusicStreamProvider streamProvider,
         TimeProvider timeProvider,
         RoomQueueSettings settings,
         IRoomRealtimePublisher realtime,
@@ -50,6 +53,8 @@ public sealed class RoomQueueApplicationService
             ?? throw new ArgumentNullException(nameof(currentGuest));
         _catalog = catalog
             ?? throw new ArgumentNullException(nameof(catalog));
+        _streamProvider = streamProvider
+            ?? throw new ArgumentNullException(nameof(streamProvider));
         _timeProvider = timeProvider
             ?? throw new ArgumentNullException(nameof(timeProvider));
         _settings = settings
@@ -123,6 +128,40 @@ public sealed class RoomQueueApplicationService
             throw Error(
                 ApplicationErrorCode.TrackNotEligible,
                 "The track has no valid duration.");
+        }
+        
+        bool canStream;
+
+        try
+        {
+            canStream = await _streamProvider.CanStreamAsync(
+                musicTrack.Reference,
+                cancellationToken);
+        }
+        catch (MusicProviderException exception)
+        {
+            var code = exception.FailureKind switch
+            {
+                MusicProviderFailureKind.AccessDenied =>
+                    ApplicationErrorCode.StreamAccessDenied,
+
+                MusicProviderFailureKind.RateLimited =>
+                    ApplicationErrorCode.MusicProviderRateLimited,
+
+                _ => ApplicationErrorCode.MusicProviderUnavailable
+            };
+
+            throw new RoomApplicationException(
+                code,
+                "Unable to verify Audius streaming availability.",
+                exception);
+        }
+
+        if (!canStream)
+        {
+            throw Error(
+                ApplicationErrorCode.TrackNotStreamable,
+                "This track cannot be streamed publicly.");
         }
 
         QueuedTrack queuedTrack;

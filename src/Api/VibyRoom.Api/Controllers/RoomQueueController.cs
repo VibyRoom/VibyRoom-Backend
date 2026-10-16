@@ -17,6 +17,8 @@ namespace VibyRoom.Api.Controllers;
     Location = ResponseCacheLocation.None)]
 public sealed class RoomQueueController : ControllerBase
 {
+    private const string GetQueueRouteName = "GetRoomQueue";
+
     private readonly RoomQueueApplicationService _queueService;
 
     public RoomQueueController(
@@ -26,7 +28,7 @@ public sealed class RoomQueueController : ControllerBase
             ?? throw new ArgumentNullException(nameof(queueService));
     }
 
-    [HttpGet]
+    [HttpGet(Name = GetQueueRouteName)]
     [ProducesResponseType(
         typeof(RoomQueueResponse),
         StatusCodes.Status200OK)]
@@ -53,6 +55,7 @@ public sealed class RoomQueueController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<RoomQueueResponse>> AddItemAsync(
         [FromRoute] Guid roomId,
@@ -72,8 +75,8 @@ public sealed class RoomQueueController : ControllerBase
 
         var response = RoomQueueResponseMapper.ToResponse(queue);
 
-        return CreatedAtAction(
-            nameof(GetQueueAsync),
+        return CreatedAtRoute(
+            GetQueueRouteName,
             new { roomId },
             response);
     }

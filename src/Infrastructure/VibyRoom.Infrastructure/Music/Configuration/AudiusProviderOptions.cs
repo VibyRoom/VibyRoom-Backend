@@ -13,4 +13,6 @@ public sealed class AudiusProviderOptions
     public string? BearerToken { get; set; }
 
     public int TimeoutSeconds { get; set; } = 15;
+
+    public string[] AllowedStreamRedirectHosts { get; set; } = [];
 }

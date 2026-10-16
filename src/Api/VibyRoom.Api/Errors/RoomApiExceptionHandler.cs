@@ -265,7 +265,28 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
                     "Playback not active",
                     "There is no active track to control."
                 ),
+            
+            ApplicationErrorCode.TrackNotStreamable =>
+            (
+                StatusCodes.Status422UnprocessableEntity,
+                "Track not streamable",
+                "The track cannot be streamed publicly."
+            ),
 
+            ApplicationErrorCode.StreamAccessDenied =>
+            (
+                StatusCodes.Status403Forbidden,
+                "Streaming access denied",
+                "The music provider denied streaming access."
+            ),
+
+            ApplicationErrorCode.PlaybackItemMismatch =>
+            (
+                StatusCodes.Status409Conflict,
+                "Playback item mismatch",
+                "The requested track is no longer current."
+            ),
+            
             _ => throw new ArgumentOutOfRangeException(
                 nameof(code),
                 code,

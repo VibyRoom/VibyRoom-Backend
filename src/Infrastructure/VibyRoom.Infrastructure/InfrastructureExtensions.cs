@@ -49,13 +49,25 @@ public static class InfrastructureExtensions
                     && string.IsNullOrEmpty(uri.Fragment),
                 "MusicProvider:BaseUrl must be the official Audius API endpoint.")
             .Validate(
-                options => options.TimeoutSeconds is >= 1 and <= 120,
+                options =>
+                    options.TimeoutSeconds is >= 1 and <= 120,
                 "MusicProvider:TimeoutSeconds must be between 1 and 120.")
             .ValidateOnStart();
 
         services.AddHttpClient<
             IMusicCatalogProvider,
             AudiusMusicCatalogClient>();
+
+        services
+            .AddHttpClient<
+                IMusicStreamProvider,
+                AudiusStreamProvider>()
+            .ConfigurePrimaryHttpMessageHandler(
+                () => new HttpClientHandler
+                {
+                    AllowAutoRedirect = false,
+                    UseCookies = false
+                });
 
         return services;
     }
