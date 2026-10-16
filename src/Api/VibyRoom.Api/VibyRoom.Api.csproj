@@ -7,7 +7,29 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5"/>
+        <PackageReference
+                Include="Microsoft.AspNetCore.OpenApi"
+                Version="10.0.13" />
+
+        <PackageReference
+                Include="Microsoft.EntityFrameworkCore.Design"
+                Version="10.0.13">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+        </PackageReference>
+
+        <PackageReference
+                Include="Swashbuckle.AspNetCore.SwaggerUI"
+                Version="10.3.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference
+                Include="..\..\Application\VibyRoom.Application\VibyRoom.Application.csproj" />
+        <ProjectReference
+                Include="..\..\Infrastructure\VibyRoom.Infrastructure.Persistence\VibyRoom.Infrastructure.Persistence.csproj" />
+        <ProjectReference
+                Include="..\..\Infrastructure\VibyRoom.Infrastructure\VibyRoom.Infrastructure.csproj" />
     </ItemGroup>
 
 </Project>
