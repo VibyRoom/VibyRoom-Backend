@@ -1,9 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\Domain\VibyRoom.Domain.Core\VibyRoom.Domain.Core.csproj" />
+        <ProjectReference Include="..\..\Domain\VibyRoom.Domain.Music\VibyRoom.Domain.Music.csproj" />
+        <ProjectReference Include="..\VibyRoom.Application.Contracts\VibyRoom.Application.Contracts.csproj" />
+    </ItemGroup>
 
 </Project>

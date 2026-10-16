@@ -1,0 +1,98 @@
+name: vibyroom
+
+x-api-environment: &api-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_HTTP_PORTS: "8080"
+  ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:?};Username=${POSTGRES_USER:?};Password=${POSTGRES_PASSWORD:?}"
+  DataProtection__ApplicationName: VibyRoom
+  DataProtection__KeysDirectory: /app/keys
+  Realtime__AllowedOrigins__0: "https://${SITE_DOMAIN:?}:8443"
+  AllowedHosts: "${SITE_DOMAIN:?}"
+  ReverseProxy__KnownProxy: "172.30.100.2"
+  MusicProvider__AllowedStreamRedirectHosts__0: "validator.eeba4a6ca56a0d87af802270217c2a51.r2.cloudflarestorage.com"
+  Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command: Warning
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?}"
+      POSTGRES_USER: "${POSTGRES_USER:?}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    networks:
+      - data
+
+  migrate:
+    image: "${API_IMAGE:-vibyroom-api:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    entrypoint:
+      - /app/efbundle
+    environment: *api-environment
+    volumes:
+      - data_protection_keys:/app/keys
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data
+
+  api:
+    image: "${API_IMAGE:-vibyroom-api:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment: *api-environment
+    volumes:
+      - data_protection_keys:/app/keys
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - edge
+      - data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: "${SITE_DOMAIN:?}"
+    ports:
+      - "80:80"
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      edge:
+        ipv4_address: 172.30.100.2
+
+volumes:
+  postgres_data:
+  data_protection_keys:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+    external: true
+    name: vibyroom-edge
+
+  data:
+    internal: true

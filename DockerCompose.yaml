@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: vibyroom-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: vibyroom
+      POSTGRES_USER: vibyroom
+      POSTGRES_PASSWORD: ${VIBYROOM_POSTGRES_PASSWORD:?Database password is required}
+
+    ports:
+      - "127.0.0.1:5437:5432"
+
+    volumes:
+      - vibyroom_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  vibyroom_postgres_data:
