@@ -1,3 +1,5 @@
+using VibyRoom.Application.Contracts.Queue;
+
 namespace VibyRoom.Application.Abstractions.Realtime;
 
 public interface IRoomRealtimePublisher
@@ -25,5 +27,9 @@ public interface IRoomRealtimePublisher
 
     Task RoomClosedAsync(
         Guid roomId,
+        CancellationToken cancellationToken = default);
+
+    Task QueueChangedAsync(
+        RoomQueueDetails queue,
         CancellationToken cancellationToken = default);
 }

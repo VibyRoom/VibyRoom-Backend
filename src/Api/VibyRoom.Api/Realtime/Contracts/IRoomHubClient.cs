@@ -22,4 +22,7 @@ public interface IRoomHubClient
 
     Task RoomClosed(
         RoomClosed payload);
+
+    Task QueueChanged(
+        QueueChanged payload);
 }
