@@ -247,6 +247,58 @@ namespace VibyRoom.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_room_music_sessions_rooms_room_id");
+
+                    b.OwnsOne("VibyRoom.Domain.Music.Playback.PlaybackState", "Playback", b1 =>
+                        {
+                            b1.Property<Guid>("RoomId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("room_id");
+
+                            b1.Property<DateTimeOffset?>("AnchorAtUtc")
+                                .HasColumnType("timestamp with time zone")
+                                .HasColumnName("anchor_at_utc");
+
+                            b1.Property<string>("CurrentItem")
+                                .HasColumnType("jsonb")
+                                .HasColumnName("current_item");
+
+                            b1.Property<DateTimeOffset?>("NextTransitionAtUtc")
+                                .HasColumnType("timestamp with time zone")
+                                .HasColumnName("next_transition_at_utc");
+
+                            b1.Property<long>("PositionAnchorMs")
+                                .HasColumnType("bigint")
+                                .HasColumnName("position_anchor_ms");
+
+                            b1.Property<string>("Status")
+                                .IsRequired()
+                                .HasMaxLength(16)
+                                .HasColumnType("character varying(16)")
+                                .HasColumnName("status");
+
+                            b1.HasKey("RoomId")
+                                .HasName("pk_room_music_playback");
+
+                            b1.HasIndex("NextTransitionAtUtc")
+                                .HasDatabaseName("ix_room_music_playback_due")
+                                .HasFilter("status = 'playing' AND next_transition_at_utc IS NOT NULL");
+
+                            b1.ToTable("room_music_playback", null, t =>
+                                {
+                                    t.HasCheckConstraint("ck_room_music_playback_consistency", "(status = 'stopped'\n    AND current_item IS NULL\n    AND position_anchor_ms = 0\n    AND anchor_at_utc IS NULL\n    AND next_transition_at_utc IS NULL)\nOR\n(status = 'paused'\n    AND current_item IS NOT NULL\n    AND anchor_at_utc IS NULL\n    AND next_transition_at_utc IS NULL)\nOR\n(status = 'playing'\n    AND current_item IS NOT NULL\n    AND anchor_at_utc IS NOT NULL\n    AND next_transition_at_utc IS NOT NULL)");
+
+                                    t.HasCheckConstraint("ck_room_music_playback_position", "position_anchor_ms >= 0");
+
+                                    t.HasCheckConstraint("ck_room_music_playback_status", "status IN ('stopped', 'playing', 'paused')");
+                                });
+
+                            b1.WithOwner()
+                                .HasForeignKey("RoomId")
+                                .HasConstraintName("fk_room_music_playback_sessions_room_id");
+                        });
+
+                    b.Navigation("Playback")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("VibyRoom.Domain.Core.Entities.Rooms.Room", b =>

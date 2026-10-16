@@ -4,9 +4,11 @@ using VibyRoom.Application.Abstractions.Exceptions;
 using VibyRoom.Application.Abstractions.Repositories;
 using VibyRoom.Application.Abstractions.Realtime;
 using VibyRoom.Application.Configuration;
+using VibyRoom.Application.Contracts.Playback;
 using VibyRoom.Application.Contracts.Queue;
 using VibyRoom.Application.Errors;
 using VibyRoom.Application.Music;
+using VibyRoom.Application.Playback;
 using VibyRoom.Domain.Core.Entities.Rooms;
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
 using VibyRoom.Domain.Music.Queue;
@@ -46,7 +48,8 @@ public sealed class RoomQueueApplicationService
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _currentGuest = currentGuest
             ?? throw new ArgumentNullException(nameof(currentGuest));
-        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        _catalog = catalog
+            ?? throw new ArgumentNullException(nameof(catalog));
         _timeProvider = timeProvider
             ?? throw new ArgumentNullException(nameof(timeProvider));
         _settings = settings
@@ -60,7 +63,7 @@ public sealed class RoomQueueApplicationService
         {
             throw new ArgumentOutOfRangeException(
                 nameof(settings),
-                "The maximum pending queue size must be between 1 and 100.");
+                "Maximum pending queue size must be between 1 and 100.");
         }
     }
 
@@ -72,14 +75,12 @@ public sealed class RoomQueueApplicationService
         ValidateRoomId(roomId);
 
         var room = await _rooms.GetByIdAsync(
-            roomId,
-            cancellationToken);
+            roomId, cancellationToken);
 
         RequireMemberRole(room, guestId);
 
         var session = await _queues.GetByRoomIdAsync(
-            roomId,
-            cancellationToken);
+            roomId, cancellationToken);
 
         return MapQueue(roomId, session);
     }
@@ -101,18 +102,14 @@ public sealed class RoomQueueApplicationService
                 "A valid track reference is required.");
         }
 
-        // Avoid an external Audius request for obvious non-members.
-        // This is only a preliminary check; authorization is
-        // repeated under the PostgreSQL Room lock.
+        // Проверка до запроса к Audius.
         var preliminaryRoom = await _rooms.GetByIdAsync(
-            roomId,
-            cancellationToken);
+            roomId, cancellationToken);
 
         RequireMemberRole(preliminaryRoom, guestId);
 
         var musicTrack = await _catalog.GetTrackAsync(
-            reference,
-            cancellationToken);
+            reference, cancellationToken);
 
         if (musicTrack is null)
         {
@@ -148,19 +145,23 @@ public sealed class RoomQueueApplicationService
                 exception);
         }
 
-        RoomQueueDetails committed;
+        (
+            RoomQueueDetails Queue,
+            RoomMusicStateDetails Music
+        ) committed;
 
         try
         {
-            committed = await _writer.ExecuteAsync(
+            committed = await _writer.ExecuteAsync<(
+                RoomQueueDetails Queue,
+                RoomMusicStateDetails Music)>(
                 roomId,
                 async (room, ct) =>
                 {
                     RequireMemberRole(room, guestId);
 
                     var session = await _queues.GetByRoomIdAsync(
-                        roomId,
-                        ct);
+                        roomId, ct);
 
                     if (session is null)
                     {
@@ -171,19 +172,27 @@ public sealed class RoomQueueApplicationService
                         await _queues.AddAsync(session, ct);
                     }
 
+                    var now = _timeProvider.GetUtcNow();
+
                     try
                     {
+                        session.AdvanceIfDue(now);
+
                         session.AddTrack(
                             queuedTrack,
                             guestId,
-                            _timeProvider.GetUtcNow());
+                            now);
                     }
                     catch (RoomQueueDomainException exception)
                     {
                         throw MapDomainError(exception);
                     }
 
-                    return MapQueue(roomId, session);
+                    return (
+                        Queue: MapQueue(roomId, session),
+                        Music: RoomMusicStateMapper.ToDetails(
+                            roomId, session, now)
+                    );
                 },
                 cancellationToken);
         }
@@ -191,83 +200,49 @@ public sealed class RoomQueueApplicationService
         {
             throw MapConcurrencyError(exception);
         }
+        catch (RoomConcurrencyException exception)
+        {
+            throw MapConcurrencyError(exception);
+        }
 
-        await TryPublishAsync(committed);
-        return committed;
+        await PublishCommittedAsync(
+            committed.Queue,
+            committed.Music,
+            queueChanged: true);
+
+        return committed.Queue;
     }
 
-    public async Task<RoomQueueDetails> RemoveTrackAsync(
+    public Task<RoomQueueDetails> RemoveTrackAsync(
         Guid roomId,
         Guid queueItemId,
         long expectedVersion,
         CancellationToken cancellationToken = default)
     {
-        var guestId = RequireGuest();
-        ValidateRoomId(roomId);
         ValidateItemId(queueItemId);
-        ValidateExpectedVersion(expectedVersion);
 
-        RoomQueueDetails committed;
-
-        try
-        {
-            committed = await _writer.ExecuteAsync(
-                roomId,
-                async (room, ct) =>
-                {
-                    var role = RequireMemberRole(room, guestId);
-
-                    var session = await _queues.GetByRoomIdAsync(
-                        roomId,
-                        ct);
-
-                    EnsureVersion(
-                        expectedVersion,
-                        session?.Version ?? 0);
-
-                    if (session is null)
-                    {
-                        throw Error(
-                            ApplicationErrorCode.QueueItemNotFound,
-                            "Queue item was not found.");
-                    }
-
-                    try
-                    {
-                        session.RemoveTrack(
-                            queueItemId,
-                            guestId,
-                            role);
-                    }
-                    catch (RoomQueueDomainException exception)
-                    {
-                        throw MapDomainError(exception);
-                    }
-
-                    return MapQueue(roomId, session);
-                },
-                cancellationToken);
-        }
-        catch (RoomQueueConcurrencyException exception)
-        {
-            throw MapConcurrencyError(exception);
-        }
-
-        await TryPublishAsync(committed);
-        return committed;
+        return ExecuteQueueMutationAsync(
+            roomId,
+            expectedVersion,
+            ownerOnly: false,
+            (session, role, guestId) =>
+            {
+                session.RemoveTrack(
+                    queueItemId,
+                    guestId,
+                    role);
+            },
+            cancellationToken);
     }
 
-    public async Task<RoomQueueDetails> MoveTrackAsync(
+    public Task<RoomQueueDetails> MoveTrackAsync(
         Guid roomId,
         Guid queueItemId,
         int position,
         long expectedVersion,
         CancellationToken cancellationToken = default)
     {
-        var guestId = RequireGuest();
-        ValidateRoomId(roomId);
         ValidateItemId(queueItemId);
-        ValidateExpectedVersion(expectedVersion);
 
         if (position < 0)
         {
@@ -276,18 +251,53 @@ public sealed class RoomQueueApplicationService
                 "Position cannot be negative.");
         }
 
-        var changed = false;
-        RoomQueueDetails committed;
+        return ExecuteQueueMutationAsync(
+            roomId,
+            expectedVersion,
+            ownerOnly: true,
+            (session, role, _) =>
+            {
+                session.MoveTrack(
+                    queueItemId,
+                    position,
+                    role);
+            },
+            cancellationToken);
+    }
+
+    private async Task<RoomQueueDetails> ExecuteQueueMutationAsync(
+        Guid roomId,
+        long expectedVersion,
+        bool ownerOnly,
+        Action<RoomMusicSession, RoomRole, Guid> operation,
+        CancellationToken cancellationToken)
+    {
+        var guestId = RequireGuest();
+        ValidateRoomId(roomId);
+        ValidateExpectedVersion(expectedVersion);
+
+        ArgumentNullException.ThrowIfNull(operation);
+
+        (
+            RoomQueueDetails Queue,
+            RoomMusicStateDetails Music,
+            bool Changed,
+            bool QueueChanged
+        ) committed;
 
         try
         {
-            committed = await _writer.ExecuteAsync(
+            committed = await _writer.ExecuteAsync<(
+                RoomQueueDetails Queue,
+                RoomMusicStateDetails Music,
+                bool Changed,
+                bool QueueChanged)>(
                 roomId,
                 async (room, ct) =>
                 {
                     var role = RequireMemberRole(room, guestId);
 
-                    if (role != RoomRole.Owner)
+                    if (ownerOnly && role != RoomRole.Owner)
                     {
                         throw Error(
                             ApplicationErrorCode.AccessDenied,
@@ -295,8 +305,25 @@ public sealed class RoomQueueApplicationService
                     }
 
                     var session = await _queues.GetByRoomIdAsync(
-                        roomId,
-                        ct);
+                        roomId, ct);
+
+                    var previousVersion = session?.Version ?? 0;
+
+                    var previousIds = session?.PendingItems
+                        .Select(item => item.Id)
+                        .ToArray()
+                        ?? Array.Empty<Guid>();
+
+                    var now = _timeProvider.GetUtcNow();
+
+                    try
+                    {
+                        session?.AdvanceIfDue(now);
+                    }
+                    catch (RoomQueueDomainException exception)
+                    {
+                        throw MapDomainError(exception);
+                    }
 
                     EnsureVersion(
                         expectedVersion,
@@ -311,17 +338,25 @@ public sealed class RoomQueueApplicationService
 
                     try
                     {
-                        changed = session.MoveTrack(
-                            queueItemId,
-                            position,
-                            role);
+                        operation(session, role, guestId);
                     }
                     catch (RoomQueueDomainException exception)
                     {
                         throw MapDomainError(exception);
                     }
 
-                    return MapQueue(roomId, session);
+                    var currentIds = session.PendingItems
+                        .Select(item => item.Id)
+                        .ToArray();
+
+                    return (
+                        Queue: MapQueue(roomId, session),
+                        Music: RoomMusicStateMapper.ToDetails(
+                            roomId, session, now),
+                        Changed: session.Version != previousVersion,
+                        QueueChanged: !previousIds.SequenceEqual(
+                            currentIds)
+                    );
                 },
                 cancellationToken);
         }
@@ -329,35 +364,70 @@ public sealed class RoomQueueApplicationService
         {
             throw MapConcurrencyError(exception);
         }
-
-        if (changed)
+        catch (RoomConcurrencyException exception)
         {
-            await TryPublishAsync(committed);
+            throw MapConcurrencyError(exception);
         }
 
-        return committed;
+        if (committed.Changed)
+        {
+            await PublishCommittedAsync(
+                committed.Queue,
+                committed.Music,
+                committed.QueueChanged);
+        }
+
+        return committed.Queue;
     }
 
-    private async Task TryPublishAsync(
-        RoomQueueDetails snapshot)
+    private async Task PublishCommittedAsync(
+        RoomQueueDetails queue,
+        RoomMusicStateDetails music,
+        bool queueChanged)
     {
+        if (queue.RoomId != music.RoomId ||
+            queue.Version != music.Version ||
+            music.Playback.Version != music.Version)
+        {
+            throw new InvalidOperationException(
+                "Music and queue snapshots have different versions.");
+        }
+
+        if (queueChanged)
+        {
+            try
+            {
+                using var timeout =
+                    new CancellationTokenSource(PublishTimeout);
+
+                await _realtime.QueueChangedAsync(
+                    queue,
+                    timeout.Token);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(
+                    exception,
+                    "QueueChanged delivery failed for room {RoomId}.",
+                    queue.RoomId);
+            }
+        }
+
         try
         {
-            using var timeout = new CancellationTokenSource(
-                PublishTimeout);
+            using var timeout =
+                new CancellationTokenSource(PublishTimeout);
 
-            await _realtime.QueueChangedAsync(
-                snapshot,
+            await _realtime.MusicStateChangedAsync(
+                music,
                 timeout.Token);
         }
         catch (Exception exception)
         {
             _logger.LogError(
                 exception,
-                "Queue version {Version} was committed for room " +
-                "{RoomId}, but QueueChanged delivery failed.",
-                snapshot.Version,
-                snapshot.RoomId);
+                "MusicStateChanged delivery failed for room {RoomId}.",
+                music.RoomId);
         }
     }
 
@@ -436,7 +506,7 @@ public sealed class RoomQueueApplicationService
         {
             throw Error(
                 ApplicationErrorCode.QueueVersionMismatch,
-                "The queue has changed. Reload it before retrying.");
+                "The music state has changed. Reload before retrying.");
         }
     }
 
@@ -493,6 +563,18 @@ public sealed class RoomQueueApplicationService
             RoomQueueDomainErrorCode.InvalidQueuePosition =>
                 ApplicationErrorCode.InvalidQueuePosition,
 
+            RoomQueueDomainErrorCode.QueueEmpty =>
+                ApplicationErrorCode.QueueEmpty,
+
+            RoomQueueDomainErrorCode.InvalidPlaybackState =>
+                ApplicationErrorCode.InvalidPlaybackState,
+
+            RoomQueueDomainErrorCode.InvalidPlaybackPosition =>
+                ApplicationErrorCode.InvalidPlaybackPosition,
+
+            RoomQueueDomainErrorCode.PlaybackNotActive =>
+                ApplicationErrorCode.PlaybackNotActive,
+
             _ => ApplicationErrorCode.Validation
         };
 
@@ -507,7 +589,7 @@ public sealed class RoomQueueApplicationService
     {
         return new RoomApplicationException(
             ApplicationErrorCode.ConcurrencyConflict,
-            "The queue was changed concurrently. Reload and retry.",
+            "The music state was changed concurrently. Reload and retry.",
             exception);
     }
 

@@ -5,5 +5,9 @@ public enum RoomQueueDomainErrorCode
     QueueFull,
     QueueItemNotFound,
     AccessDenied,
-    InvalidQueuePosition
+    InvalidQueuePosition,
+    QueueEmpty,
+    InvalidPlaybackState,
+    InvalidPlaybackPosition,
+    PlaybackNotActive
 }

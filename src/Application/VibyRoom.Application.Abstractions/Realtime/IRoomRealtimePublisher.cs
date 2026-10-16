@@ -1,3 +1,4 @@
+using VibyRoom.Application.Contracts.Playback;
 using VibyRoom.Application.Contracts.Queue;
 
 namespace VibyRoom.Application.Abstractions.Realtime;
@@ -31,5 +32,9 @@ public interface IRoomRealtimePublisher
 
     Task QueueChangedAsync(
         RoomQueueDetails queue,
+        CancellationToken cancellationToken = default);
+
+    Task MusicStateChangedAsync(
+        RoomMusicStateDetails musicState,
         CancellationToken cancellationToken = default);
 }

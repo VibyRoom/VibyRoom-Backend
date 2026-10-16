@@ -23,5 +23,9 @@ public enum ApplicationErrorCode
     InvalidQueuePosition,
     TrackNotEligible,
     QueueVersionMismatch,
-    QueuePreconditionRequired
+    QueuePreconditionRequired,
+    QueueEmpty,
+    InvalidPlaybackState,
+    InvalidPlaybackPosition,
+    PlaybackNotActive
 }

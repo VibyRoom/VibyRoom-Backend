@@ -1,5 +1,5 @@
-
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
+using VibyRoom.Domain.Music.Playback;
 using VibyRoom.Domain.Music.Queue.Exceptions;
 
 namespace VibyRoom.Domain.Music.Queue;
@@ -16,26 +16,23 @@ public sealed class RoomMusicSession
 
     private RoomMusicSession(
         Guid roomId,
-        int maxPendingItems)
-        : this()
+        int maxPendingItems) : this()
     {
         if (roomId == Guid.Empty)
         {
             throw new ArgumentException(
-                "Room ID cannot be empty.",
-                nameof(roomId));
+                "Room ID cannot be empty.", nameof(roomId));
         }
 
         if (maxPendingItems <= 0)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(maxPendingItems),
-                "Maximum queue size must be positive.");
+                nameof(maxPendingItems));
         }
 
         RoomId = roomId;
         MaxPendingItems = maxPendingItems;
-        Version = 0;
+        Playback = PlaybackState.Stopped();
     }
 
     public Guid RoomId { get; private set; }
@@ -44,16 +41,16 @@ public sealed class RoomMusicSession
 
     public int MaxPendingItems { get; private set; }
 
-    public IReadOnlyList<QueueItem> PendingItems =>
-        _pendingItemsView;
+    public PlaybackState Playback { get; private set; }
+        = PlaybackState.Stopped();
+
+    public IReadOnlyList<QueueItem> PendingItems => _pendingItemsView;
 
     public static RoomMusicSession Create(
         Guid roomId,
         int maxPendingItems)
     {
-        return new RoomMusicSession(
-            roomId,
-            maxPendingItems);
+        return new RoomMusicSession(roomId, maxPendingItems);
     }
 
     public QueueItem AddTrack(
@@ -66,15 +63,13 @@ public sealed class RoomMusicSession
         if (guestId == Guid.Empty)
         {
             throw new ArgumentException(
-                "Guest ID cannot be empty.",
-                nameof(guestId));
+                "Guest ID cannot be empty.", nameof(guestId));
         }
 
         if (addedAtUtc == default)
         {
             throw new ArgumentException(
-                "Track addition time is required.",
-                nameof(addedAtUtc));
+                "Track addition time is required.", nameof(addedAtUtc));
         }
 
         if (_pendingItems.Count >= MaxPendingItems)
@@ -137,9 +132,7 @@ public sealed class RoomMusicSession
         EnsureVersionCanAdvance();
 
         _pendingItems.RemoveAt(index);
-
         NormalizePositions();
-
         Version++;
     }
 
@@ -187,7 +180,154 @@ public sealed class RoomMusicSession
         _pendingItems.Insert(newPosition, item);
 
         NormalizePositions();
+        Version++;
 
+        return true;
+    }
+
+    public void Play(DateTimeOffset nowUtc)
+    {
+        EnsureStatus(PlaybackStatus.Stopped);
+        EnsureQueueNotEmpty();
+        EnsureVersionCanAdvance();
+        ValidateTime(nowUtc);
+
+        StartNext(nowUtc, paused: false);
+        Version++;
+    }
+
+    public void Pause(DateTimeOffset nowUtc)
+    {
+        EnsureStatus(PlaybackStatus.Playing);
+        EnsureVersionCanAdvance();
+        ValidateTime(nowUtc);
+
+        if (Playback.GetCurrentPosition(nowUtc) >=
+            Playback.CurrentItem!.Track.DurationMs)
+        {
+            throw new RoomQueueDomainException(
+                RoomQueueDomainErrorCode.InvalidPlaybackState,
+                "The track has already ended; advance playback first.");
+        }
+
+        Playback.Pause(nowUtc);
+        Version++;
+    }
+
+    public void Resume(DateTimeOffset nowUtc)
+    {
+        EnsureStatus(PlaybackStatus.Paused);
+        EnsureVersionCanAdvance();
+        ValidateTime(nowUtc);
+
+        Playback.Resume(nowUtc);
+        Version++;
+    }
+
+    public bool Seek(long positionMs, DateTimeOffset nowUtc)
+    {
+        EnsureActivePlayback();
+        ValidateTime(nowUtc);
+
+        if (positionMs < 0 ||
+            positionMs >= Playback.CurrentItem!.Track.DurationMs)
+        {
+            throw new RoomQueueDomainException(
+                RoomQueueDomainErrorCode.InvalidPlaybackPosition,
+                "The requested playback position is invalid.");
+        }
+
+        if (Playback.Status == PlaybackStatus.Playing &&
+            Playback.GetCurrentPosition(nowUtc) >=
+            Playback.CurrentItem.Track.DurationMs)
+        {
+            throw new RoomQueueDomainException(
+                RoomQueueDomainErrorCode.InvalidPlaybackState,
+                "The track has already ended; advance playback first.");
+        }
+
+        if (Playback.Status == PlaybackStatus.Paused &&
+            Playback.PositionAnchorMs == positionMs)
+        {
+            return false;
+        }
+
+        EnsureVersionCanAdvance();
+
+        Playback.Seek(positionMs, nowUtc);
+        Version++;
+
+        return true;
+    }
+
+    public void Skip(DateTimeOffset nowUtc)
+    {
+        EnsureActivePlayback();
+        EnsureVersionCanAdvance();
+        ValidateTime(nowUtc);
+
+        var paused = Playback.Status == PlaybackStatus.Paused;
+
+        if (_pendingItems.Count == 0)
+        {
+            Playback.Stop();
+        }
+        else
+        {
+            StartNext(nowUtc, paused);
+        }
+
+        Version++;
+    }
+
+    public bool AdvanceIfDue(DateTimeOffset nowUtc)
+    {
+        ValidateTime(nowUtc);
+
+        if (Playback.Status != PlaybackStatus.Playing ||
+            Playback.CurrentItem is null ||
+            nowUtc.ToUniversalTime() < Playback.GetScheduledEndUtc())
+        {
+            return false;
+        }
+
+        EnsureVersionCanAdvance();
+
+        do
+        {
+            var scheduledEnd = Playback.GetScheduledEndUtc();
+
+            if (_pendingItems.Count == 0)
+            {
+                Playback.Stop();
+                break;
+            }
+
+            StartNext(scheduledEnd, paused: false);
+        }
+        while (
+            Playback.Status == PlaybackStatus.Playing &&
+            nowUtc.ToUniversalTime() >= Playback.GetScheduledEndUtc());
+
+        Version++;
+        return true;
+    }
+
+    public long GetCurrentPosition(DateTimeOffset nowUtc)
+    {
+        return Playback.GetCurrentPosition(nowUtc);
+    }
+
+    public bool StopForRoomClosure()
+    {
+        if (Playback.Status == PlaybackStatus.Stopped)
+        {
+            return false;
+        }
+
+        EnsureVersionCanAdvance();
+
+        Playback.Stop();
         Version++;
 
         return true;
@@ -204,17 +344,65 @@ public sealed class RoomMusicSession
             item => item.Id == itemId);
     }
 
+    private void StartNext(DateTimeOffset nowUtc, bool paused)
+    {
+        var queueItem = _pendingItems[0];
+        var currentItem = CurrentPlaybackItem.FromQueueItem(queueItem);
+
+        Playback.Start(currentItem, nowUtc, paused);
+
+        _pendingItems.RemoveAt(0);
+        NormalizePositions();
+    }
+
+    private void EnsureQueueNotEmpty()
+    {
+        if (_pendingItems.Count == 0)
+        {
+            throw new RoomQueueDomainException(
+                RoomQueueDomainErrorCode.QueueEmpty,
+                "The music queue is empty.");
+        }
+    }
+
+    private void EnsureStatus(PlaybackStatus status)
+    {
+        if (Playback.Status != status)
+        {
+            throw new RoomQueueDomainException(
+                RoomQueueDomainErrorCode.InvalidPlaybackState,
+                $"Playback must be {status} for this operation.");
+        }
+    }
+
+    private void EnsureActivePlayback()
+    {
+        if (Playback.Status == PlaybackStatus.Stopped ||
+            Playback.CurrentItem is null)
+        {
+            throw new RoomQueueDomainException(
+                RoomQueueDomainErrorCode.PlaybackNotActive,
+                "No track is currently active.");
+        }
+    }
+
+    private static void ValidateTime(DateTimeOffset nowUtc)
+    {
+        if (nowUtc == default)
+        {
+            throw new ArgumentException(
+                "Server time is required.", nameof(nowUtc));
+        }
+    }
+
     private int FindItemIndex(Guid itemId)
     {
-        return _pendingItems.FindIndex(
-            item => item.Id == itemId);
+        return _pendingItems.FindIndex(item => item.Id == itemId);
     }
 
     private void NormalizePositions()
     {
-        for (var index = 0;
-             index < _pendingItems.Count;
-             index++)
+        for (var index = 0; index < _pendingItems.Count; index++)
         {
             _pendingItems[index].ChangePosition(index);
         }
@@ -234,15 +422,13 @@ public sealed class RoomMusicSession
         if (itemId == Guid.Empty)
         {
             throw new ArgumentException(
-                "Queue item ID cannot be empty.",
-                nameof(itemId));
+                "Queue item ID cannot be empty.", nameof(itemId));
         }
     }
 
     private static void EnsureValidRole(RoomRole actorRole)
     {
-        if (actorRole is not
-            (RoomRole.Owner or RoomRole.Member))
+        if (actorRole is not (RoomRole.Owner or RoomRole.Member))
         {
             throw new RoomQueueDomainException(
                 RoomQueueDomainErrorCode.AccessDenied,

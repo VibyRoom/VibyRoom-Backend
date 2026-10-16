@@ -1,3 +1,5 @@
+using VibyRoom.Application.Contracts.Playback;
+
 namespace VibyRoom.Api.Realtime.Contracts;
 
 public interface IRoomHubClient
@@ -25,4 +27,7 @@ public interface IRoomHubClient
 
     Task QueueChanged(
         QueueChanged payload);
+
+    Task MusicStateChanged(
+        RoomMusicStateDetails payload);
 }

@@ -8,6 +8,11 @@ public interface IRoomMusicSessionRepository
         Guid roomId,
         CancellationToken cancellationToken = default);
 
+    Task<List<Guid>> GetDueRoomIdsAsync(
+        DateTimeOffset nowUtc,
+        int batchSize,
+        CancellationToken cancellationToken = default);
+
     Task AddAsync(
         RoomMusicSession session,
         CancellationToken cancellationToken = default);

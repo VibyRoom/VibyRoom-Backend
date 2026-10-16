@@ -1,10 +1,10 @@
-
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using VibyRoom.Application.Abstractions.Rooms;
 using VibyRoom.Application.Configuration;
 using VibyRoom.Application.Music;
+using VibyRoom.Application.Playback;
 using VibyRoom.Application.Queue;
 using VibyRoom.Application.Rooms;
 
@@ -51,6 +51,7 @@ public static class ApplicationExtensions
 
         services.AddScoped<RoomApplicationService>();
         services.AddScoped<RoomQueueApplicationService>();
+        services.AddScoped<RoomPlaybackApplicationService>();
 
         services.AddScoped<
             IRoomMembershipQuery,

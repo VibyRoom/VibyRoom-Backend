@@ -71,7 +71,8 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
             httpContext.TraceIdentifier;
 
         httpContext.Response.StatusCode =
-            problem.Status ?? StatusCodes.Status500InternalServerError;
+            problem.Status
+            ?? StatusCodes.Status500InternalServerError;
 
         httpContext.Response.Headers.CacheControl = "no-store";
 
@@ -226,15 +227,43 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
             ApplicationErrorCode.QueueVersionMismatch =>
                 (
                     StatusCodes.Status412PreconditionFailed,
-                    "Queue version mismatch",
-                    "The queue has changed. Reload and retry."
+                    "Music version mismatch",
+                    "The music state has changed. Reload and retry."
                 ),
 
             ApplicationErrorCode.QueuePreconditionRequired =>
                 (
                     StatusCodes.Status428PreconditionRequired,
-                    "Queue precondition required",
+                    "Music precondition required",
                     "A valid If-Match header is required."
+                ),
+
+            ApplicationErrorCode.QueueEmpty =>
+                (
+                    StatusCodes.Status409Conflict,
+                    "Queue empty",
+                    "There are no tracks available for playback."
+                ),
+
+            ApplicationErrorCode.InvalidPlaybackState =>
+                (
+                    StatusCodes.Status409Conflict,
+                    "Invalid playback state",
+                    "The playback operation is not allowed in the current state."
+                ),
+
+            ApplicationErrorCode.InvalidPlaybackPosition =>
+                (
+                    StatusCodes.Status400BadRequest,
+                    "Invalid playback position",
+                    "The requested playback position is invalid."
+                ),
+
+            ApplicationErrorCode.PlaybackNotActive =>
+                (
+                    StatusCodes.Status409Conflict,
+                    "Playback not active",
+                    "There is no active track to control."
                 ),
 
             _ => throw new ArgumentOutOfRangeException(
