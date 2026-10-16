@@ -81,7 +81,8 @@ services:
       - api
     networks:
       edge:
-        ipv4_address: 172.30.100.2
+        ipv4_address: 172.30.100.3
+      data:
 
 volumes:
   postgres_data:
