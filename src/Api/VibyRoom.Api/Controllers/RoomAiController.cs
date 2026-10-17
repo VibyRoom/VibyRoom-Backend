@@ -56,12 +56,9 @@ public sealed class RoomAiController : ControllerBase
     [EnableRateLimiting(RoomRateLimitOptions.AiGenerationPolicy)]
     [EndpointSummary("Generate 15 AI tracks")]
     [EndpointDescription(
-        "Uses GigaChat 2 Lite and Audius to find 15 unique playable " +
-        "tracks, appends them to the room queue, saves the AI prompt " +
-        "and resets the previous AI recommendation history. " +
-        "Only the room owner may call this endpoint. " +
-        "Requires the authenticated guest cookie and X-CSRF-TOKEN. " +
-        "The operation is atomic and not idempotent.")]
+        "Uses GigaChat and Audius to find 15 unique playable tracks, " +
+        "appends them to the room queue and replaces the AI context. " +
+        "Only the owner may call this endpoint; X-CSRF-TOKEN is required.")]
     [ProducesResponseType(
         typeof(RoomMusicStateResponse),
         StatusCodes.Status200OK)]
@@ -87,11 +84,8 @@ public sealed class RoomAiController : ControllerBase
     [EnableRateLimiting(RoomRateLimitOptions.AiGenerationPolicy)]
     [EndpointSummary("Add 15 more AI tracks")]
     [EndpointDescription(
-        "Reuses the previous stored AI prompt and generates 15 " +
-        "additional unique playable Audius tracks. Previously " +
-        "selected tracks from the current AI playlist are excluded. " +
-        "Requires room ownership, an authenticated guest cookie " +
-        "and X-CSRF-TOKEN. The operation is atomic and not idempotent.")]
+        "Uses the stored AI context to append 15 new playable tracks. " +
+        "Requires room ownership and X-CSRF-TOKEN.")]
     [ProducesResponseType(
         typeof(RoomMusicStateResponse),
         StatusCodes.Status200OK)]
@@ -104,6 +98,59 @@ public sealed class RoomAiController : ControllerBase
         CancellationToken cancellationToken)
     {
         var state = await _service.MoreAsync(
+            roomId,
+            cancellationToken);
+
+        return ToResponse(state);
+    }
+
+    [HttpPost("random")]
+    [EnableRateLimiting(RoomRateLimitOptions.AiGenerationPolicy)]
+    [EndpointSummary("Add 15 surprise tracks")]
+    [EndpointDescription(
+        "Randomly chooses genres and mood, then uses GigaChat and Audius " +
+        "to append 15 unique playable tracks. Works with an empty queue. " +
+        "Saves the generated theme so More can continue it. " +
+        "Requires room ownership and X-CSRF-TOKEN.")]
+    [ProducesResponseType(
+        typeof(RoomMusicStateResponse),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<RoomMusicStateResponse>> RandomAsync(
+        [FromRoute] Guid roomId,
+        CancellationToken cancellationToken)
+    {
+        var state = await _service.RandomAsync(
+            roomId,
+            cancellationToken);
+
+        return ToResponse(state);
+    }
+
+    [HttpPost("similar")]
+    [EnableRateLimiting(RoomRateLimitOptions.AiGenerationPolicy)]
+    [EndpointSummary(
+        "Add 15 tracks similar to the current room music")]
+    [EndpointDescription(
+        "Builds a prompt from the current playing track and pending queue, " +
+        "then appends 15 unique playable Audius tracks. " +
+        "Returns 409 if the room has no reference tracks. " +
+        "Requires room ownership and X-CSRF-TOKEN.")]
+    [ProducesResponseType(
+        typeof(RoomMusicStateResponse),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<RoomMusicStateResponse>> SimilarAsync(
+        [FromRoute] Guid roomId,
+        CancellationToken cancellationToken)
+    {
+        var state = await _service.SimilarAsync(
             roomId,
             cancellationToken);
 
