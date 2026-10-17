@@ -200,6 +200,18 @@ namespace VibyRoom.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("room_id");
 
+                    b.Property<string>("AiHistoryJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("ai_history")
+                        .HasDefaultValueSql("'[]'::jsonb");
+
+                    b.Property<string>("AiPrompt")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("ai_prompt");
+
                     b.Property<int>("MaxPendingItems")
                         .HasColumnType("integer")
                         .HasColumnName("max_pending_items");

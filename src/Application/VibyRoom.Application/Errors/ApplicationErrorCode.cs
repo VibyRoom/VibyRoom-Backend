@@ -30,5 +30,8 @@ public enum ApplicationErrorCode
     PlaybackNotActive,
     TrackNotStreamable,
     StreamAccessDenied,
-    PlaybackItemMismatch
+    PlaybackItemMismatch,
+    AiNotInitialized,
+    AiGenerationUnavailable,
+    AiInsufficientTracks
 }

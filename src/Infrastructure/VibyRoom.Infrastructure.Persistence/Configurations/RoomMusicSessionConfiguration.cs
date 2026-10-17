@@ -56,6 +56,17 @@ public sealed class RoomMusicSessionConfiguration
             .HasColumnName("max_pending_items")
             .HasColumnType("integer")
             .IsRequired();
+        
+        builder.Property(session => session.AiPrompt)
+            .HasColumnName("ai_prompt")
+            .HasMaxLength(500)
+            .IsRequired(false);
+
+        builder.Property(session => session.AiHistoryJson)
+            .HasColumnName("ai_history")
+            .HasColumnType("jsonb")
+            .HasDefaultValueSql("'[]'::jsonb")
+            .IsRequired();
     }
 
     private static void ConfigureRoomRelationship(

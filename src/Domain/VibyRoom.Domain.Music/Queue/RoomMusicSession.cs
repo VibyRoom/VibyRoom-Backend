@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VibyRoom.Domain.Core.Entities.Rooms.Enums;
 using VibyRoom.Domain.Music.Playback;
 using VibyRoom.Domain.Music.Queue.Exceptions;
@@ -46,11 +47,54 @@ public sealed class RoomMusicSession
 
     public IReadOnlyList<QueueItem> PendingItems => _pendingItemsView;
 
+    public string? AiPrompt { get; private set; }
+
+    public string AiHistoryJson { get; private set; } = "[]";
+
+    public IReadOnlyList<string> AiTrackKeys =>
+        JsonSerializer.Deserialize<string[]>(AiHistoryJson) ?? [];
+
     public static RoomMusicSession Create(
         Guid roomId,
         int maxPendingItems)
     {
         return new RoomMusicSession(roomId, maxPendingItems);
+    }
+
+    public void RecordAiSelection(
+        string prompt,
+        IReadOnlyList<QueuedTrack> tracks,
+        bool resetHistory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentNullException.ThrowIfNull(tracks);
+
+        if (tracks.Count != 15)
+        {
+            throw new ArgumentException(
+                "AI selection must contain exactly 15 tracks.",
+                nameof(tracks));
+        }
+
+        var history = resetHistory
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : new HashSet<string>(
+                AiTrackKeys,
+                StringComparer.Ordinal);
+
+        foreach (var track in tracks)
+        {
+            var key = $"{track.Reference.Provider}:{track.Reference.TrackId}";
+
+            if (!history.Add(key))
+            {
+                throw new InvalidOperationException(
+                    "AI selection contains a previously selected track.");
+            }
+        }
+
+        AiPrompt = prompt;
+        AiHistoryJson = JsonSerializer.Serialize(history);
     }
 
     public QueueItem AddTrack(
