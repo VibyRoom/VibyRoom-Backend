@@ -21,4 +21,10 @@ public sealed class RoomRateLimitOptions
     public int MusicCatalogPermitLimit { get; set; } = 30;
 
     public int MusicCatalogWindowSeconds { get; set; } = 60;
+    
+    public const string AiGenerationPolicy = "AiGeneration";
+
+    public int AiGenerationPermitLimit { get; set; } = 2;
+
+    public int AiGenerationWindowSeconds { get; set; } = 60;
 }

@@ -1,0 +1,30 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5437:5432"
+
+  api:
+    ports:
+      - "127.0.0.1:5124:8080"
+    environment:
+      AllowedHosts: "localhost;127.0.0.1"
+      Realtime__AllowedOrigins__0: "http://localhost:5173"
+      GigaChat__AuthorizationKey: "${GigaChat__AuthorizationKey:?GigaChat key required}"
+      GigaChat__TimeoutSeconds: "${GigaChat__TimeoutSeconds:-60}"
+      GigaChat__TrustedRootCertificatePath: "/app/certs/gigachat-root.crt"
+    volumes:
+      - "${HOME}/.config/vibyroom/certs/russian_trusted_root_ca_pem.crt:/app/certs/gigachat-root.crt:ro"
+
+networks:
+  edge:
+    external: false
+    name: vibyroom-edge-local
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.100.0/24
+
+volumes:
+  postgres_data:
+    external: true
+    name: vibyroom-backend_vibyroom_postgres_data
