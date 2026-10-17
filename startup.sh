@@ -1,9 +1,12 @@
 (
   set -e
 
-  echo "========== 1. BUILD .NET =========="
+  echo "========== 1. DOTNET BUILD =========="
 
+  dotnet clean
+  dotnet restore
   dotnet build
+  dotnet test --no-restore
 
   echo "========== 2. LOAD ENV =========="
 
@@ -46,7 +49,7 @@
     -f compose.https.yaml \
     config --quiet
 
-  echo "========== 4. BUILD & START =========="
+  echo "========== 4. BUILD DOCKER =========="
 
   docker compose \
     -f compose.yaml \
@@ -54,13 +57,10 @@
     -f compose.https.yaml \
     up -d --build api local-https
 
-  echo "========== 5. CONTAINERS =========="
+  echo "========== 5. CONTAINER STATUS =========="
 
-  docker compose \
-    -f compose.yaml \
-    -f compose.local.yaml \
-    -f compose.https.yaml \
-    ps -a
+  docker ps --format \
+    "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
   echo "========== 6. HTTPS CHECK =========="
 
