@@ -149,6 +149,32 @@ public static class RoomRateLimitingExtensions
                     contentType: "application/problem+json",
                     cancellationToken: cancellationToken);
             };
+            
+            options.AddPolicy(
+                RoomRateLimitOptions.AiGenerationPolicy,
+                context =>
+                {
+                    var guestId = context.RequestServices
+                        .GetRequiredService<ICurrentGuest>()
+                        .GuestId;
+
+                    var key = guestId.HasValue
+                        ? $"ai:{guestId.Value:D}"
+                        : "ai:unauthenticated";
+
+                    return RateLimitPartition.GetFixedWindowLimiter(
+                        key,
+                        _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = settings.AiGenerationPermitLimit,
+                            Window = TimeSpan.FromSeconds(
+                                settings.AiGenerationWindowSeconds),
+                            QueueProcessingOrder =
+                                QueueProcessingOrder.OldestFirst,
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        });
+                });
         });
 
         return services;
@@ -191,6 +217,13 @@ public static class RoomRateLimitingExtensions
         {
             throw new InvalidOperationException(
                 "MusicCatalogWindowSeconds must be positive.");
+        }
+        
+        if (settings.AiGenerationPermitLimit <= 0 ||
+            settings.AiGenerationWindowSeconds <= 0)
+        {
+            throw new InvalidOperationException(
+                "AI generation rate limit settings must be positive.");
         }
     }
 }

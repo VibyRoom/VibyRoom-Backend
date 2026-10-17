@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using VibyRoom.Application.Abstractions.Invitations;
 using VibyRoom.Application.Abstractions.Music;
+using VibyRoom.Infrastructure.Ai;
 using VibyRoom.Infrastructure.Invitations;
 using VibyRoom.Infrastructure.Music;
 using VibyRoom.Infrastructure.Music.Configuration;
@@ -68,6 +70,62 @@ public static class InfrastructureExtensions
                     AllowAutoRedirect = false,
                     UseCookies = false
                 });
+
+        services
+            .AddOptions<GigaChatOptions>()
+            .Bind(configuration.GetSection(
+                GigaChatOptions.SectionName))
+            .Validate(
+                options =>
+                    options.TimeoutSeconds is >= 5 and <= 120,
+                "GigaChat:TimeoutSeconds must be between 5 and 120.")
+            .ValidateOnStart();
+
+        services
+            .AddHttpClient(GigaChatOptions.OAuthClientName)
+            .ConfigureHttpClient((provider, client) =>
+            {
+                var options = provider
+                    .GetRequiredService<IOptions<GigaChatOptions>>()
+                    .Value;
+
+                client.Timeout = TimeSpan.FromSeconds(
+                    options.TimeoutSeconds);
+            })
+            .ConfigurePrimaryHttpMessageHandler(provider =>
+            {
+                var options = provider
+                    .GetRequiredService<IOptions<GigaChatOptions>>()
+                    .Value;
+
+                return GigaChatHttpHandlerFactory.Create(options);
+            });
+
+        services
+            .AddHttpClient(GigaChatOptions.ChatClientName)
+            .ConfigureHttpClient((provider, client) =>
+            {
+                var options = provider
+                    .GetRequiredService<IOptions<GigaChatOptions>>()
+                    .Value;
+
+                client.Timeout = TimeSpan.FromSeconds(
+                    options.TimeoutSeconds);
+            })
+            .ConfigurePrimaryHttpMessageHandler(provider =>
+            {
+                var options = provider
+                    .GetRequiredService<IOptions<GigaChatOptions>>()
+                    .Value;
+
+                return GigaChatHttpHandlerFactory.Create(options);
+            });
+
+        services.AddSingleton<GigaChatAccessTokenProvider>();
+
+        services.AddSingleton<
+            IAiMusicProvider,
+            GigaChatClient>();
 
         return services;
     }

@@ -1,0 +1,23 @@
+services:
+  api:
+    environment:
+      Realtime__AllowedOrigins__1: "https://localhost:7298"
+
+  local-https:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7298:8443"
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - local_caddy_data:/data
+      - local_caddy_config:/config
+    depends_on:
+      - api
+    networks:
+      edge:
+        ipv4_address: 172.30.100.2
+
+volumes:
+  local_caddy_data:
+  local_caddy_config:

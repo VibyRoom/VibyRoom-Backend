@@ -23,5 +23,8 @@
     <File Path="DockerCompose.yaml" />
     <File Path="env.txt" />
     <File Path=".env" />
+    <File Path="compose.local.yaml"/>
+    <File Path="Caddyfile.local"/>
+    <File Path="compose.https.yaml"/>
   </Folder>
 </Solution>
