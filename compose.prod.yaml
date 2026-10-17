@@ -1,0 +1,16 @@
+services:
+  api:
+    environment:
+      GigaChat__AuthorizationKey: "${GigaChat__AuthorizationKey:?GigaChat authorization key is required}"
+
+      GigaChat__TimeoutSeconds: "${GigaChat__TimeoutSeconds:-60}"
+
+      GigaChat__TrustedRootCertificatePath: "/app/certs/gigachat-root.crt"
+
+    volumes:
+      - type: bind
+        source: "${GIGACHAT_CA_CERT_PATH:?GigaChat CA certificate path is required}"
+        target: /app/certs/gigachat-root.crt
+        read_only: true
+        bind:
+          create_host_path: false
