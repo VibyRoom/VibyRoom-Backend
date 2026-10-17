@@ -59,6 +59,9 @@ public static class ApplicationExtensions
             RoomMembershipQuery>();
 
         services.AddScoped<MusicCatalogService>();
+        
+        services.AddScoped<AiTrackPicker>();
+        services.AddScoped<AiPlaylistApplicationService>();
 
         return services;
     }

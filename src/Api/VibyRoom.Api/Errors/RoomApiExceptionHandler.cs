@@ -287,6 +287,27 @@ public sealed class RoomApiExceptionHandler : IExceptionHandler
                 "The requested track is no longer current."
             ),
             
+            ApplicationErrorCode.AiNotInitialized =>
+            (
+                StatusCodes.Status409Conflict,
+                "AI playlist not initialized",
+                "Generate a playlist before requesting more tracks."
+            ),
+
+            ApplicationErrorCode.AiGenerationUnavailable =>
+            (
+                StatusCodes.Status503ServiceUnavailable,
+                "AI service unavailable",
+                "The AI playlist could not be generated."
+            ),
+
+            ApplicationErrorCode.AiInsufficientTracks =>
+            (
+                StatusCodes.Status422UnprocessableEntity,
+                "Not enough playable tracks",
+                "Could not find 15 unique playable tracks on Audius."
+            ),
+            
             _ => throw new ArgumentOutOfRangeException(
                 nameof(code),
                 code,

@@ -62,8 +62,9 @@ services:
       migrate:
         condition: service_completed_successfully
     networks:
-      - edge
-      - data
+      edge:
+        ipv4_address: 172.30.100.3
+      data:
 
   caddy:
     image: caddy:2
